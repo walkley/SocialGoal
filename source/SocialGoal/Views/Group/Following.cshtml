@@ -1,4 +1,4 @@
-﻿@model IEnumerable<SocialGoal.Model.Models.Group>
+@model IEnumerable<SocialGoal.Model.Models.Group>
 
 @{
     ViewBag.Title = "MyGroups";
@@ -20,7 +20,7 @@
                       <h4> @item.GroupName</h4>
    
                         
-                @Html.ActionLink(@Html.Action("NoOfUsers", new { id = @item.GroupId }) + " Members", "JoinedUsers", new { id = @item.GroupId }, null)
+                @Html.ActionLink(await Component.InvokeAsync("NoOfUsers", new { id = @item.GroupId }) + " Members", "JoinedUsers", new { id = @item.GroupId }, null)
                      </div>
                    }
                  

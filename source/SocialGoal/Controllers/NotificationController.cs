@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using SocialGoal.Model.Models;
 using SocialGoal.Service;
 using SocialGoal.Web.Core.Models;
@@ -7,11 +7,26 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
-using System.Web.Mvc;
-using Microsoft.AspNet.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 
 namespace SocialGoal.Web.Controllers
 {
+    // Extension method for AJAX request detection
+    public static class HttpRequestExtensions
+    {
+        public static bool IsAjaxRequest(this Microsoft.AspNetCore.Http.HttpRequest request)
+        {
+            if (request == null)
+                throw new ArgumentNullException(nameof(request));
+
+            return request.Headers["X-Requested-With"] == "XMLHttpRequest";
+        }
+    }
+
+
     [Authorize]
     public class NotificationController : Controller
     {
@@ -22,7 +37,9 @@ namespace SocialGoal.Web.Controllers
         ISupportInvitationService supportInvitationService;
         IFollowRequestService followRequestService;
         IUserService userService;
-        public NotificationController(IGoalService goalService, IUpdateService updateService, ICommentService commentService, IGroupInvitationService groupInvitationService, ISupportInvitationService supportInvitationService, IFollowRequestService followRequestService, IUserService userService)
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IMapper _mapper;
+        public NotificationController(IGoalService goalService, IUpdateService updateService, ICommentService commentService, IGroupInvitationService groupInvitationService, ISupportInvitationService supportInvitationService, IFollowRequestService followRequestService, IUserService userService, UserManager<ApplicationUser> userManager, IMapper mapper)
         {
             this.goalService = goalService;
             this.supportInvitationService = supportInvitationService;
@@ -31,6 +48,8 @@ namespace SocialGoal.Web.Controllers
             this.commentService = commentService;
             this.followRequestService = followRequestService;
             this.userService = userService;
+            _userManager = userManager;
+            _mapper = mapper;
         }
 
 
@@ -54,7 +73,7 @@ namespace SocialGoal.Web.Controllers
 
         public int GetNumberOfInvitations()
         {
-            return groupInvitationService.GetGroupInvitationsForUser(User.Identity.GetUserId()).Count() + supportInvitationService.GetSupportInvitationsForUser(User.Identity.GetUserId()).Count() + followRequestService.GetFollowRequestsForUser(User.Identity.GetUserId()).Count();
+            return groupInvitationService.GetGroupInvitationsForUser(_userManager.GetUserId(User)).Count() + supportInvitationService.GetSupportInvitationsForUser(_userManager.GetUserId(User)).Count() + followRequestService.GetFollowRequestsForUser(_userManager.GetUserId(User)).Count();
         }
 
         /// <summary>
@@ -64,12 +83,12 @@ namespace SocialGoal.Web.Controllers
         /// <returns></returns>
         public IEnumerable<NotificationViewModel> GetNotifications(int page, int noOfRecords)
         {
-            var groupInv = groupInvitationService.GetGroupInvitationsForUser(User.Identity.GetUserId());
-            var supportInv = supportInvitationService.GetSupportInvitationsForUser(User.Identity.GetUserId());
-            var followRequests = followRequestService.GetFollowRequests(User.Identity.GetUserId());
-            IEnumerable<NotificationViewModel> Invitations = Mapper.Map<IEnumerable<GroupInvitation>, IEnumerable<NotificationViewModel>>(groupInv);
-            Invitations = Invitations.Concat(Mapper.Map<IEnumerable<SupportInvitation>, IEnumerable<NotificationViewModel>>(supportInv));
-            Invitations = Invitations.Concat(Mapper.Map<IEnumerable<FollowRequest>, IEnumerable<NotificationViewModel>>(followRequests));
+            var groupInv = groupInvitationService.GetGroupInvitationsForUser(_userManager.GetUserId(User));
+            var supportInv = supportInvitationService.GetSupportInvitationsForUser(_userManager.GetUserId(User));
+            var followRequests = followRequestService.GetFollowRequests(_userManager.GetUserId(User));
+            IEnumerable<NotificationViewModel> Invitations = _mapper.Map<IEnumerable<GroupInvitation>, IEnumerable<NotificationViewModel>>(groupInv);
+            Invitations = Invitations.Concat(_mapper.Map<IEnumerable<SupportInvitation>, IEnumerable<NotificationViewModel>>(supportInv));
+            Invitations = Invitations.Concat(_mapper.Map<IEnumerable<FollowRequest>, IEnumerable<NotificationViewModel>>(followRequests));
             foreach (var item in Invitations)
             {
                 var fromUser = userService.GetUser(item.FromUserId);

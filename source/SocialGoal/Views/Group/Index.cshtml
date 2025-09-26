@@ -1,4 +1,4 @@
-﻿@using Microsoft.AspNet.Identity
+@using Microsoft.AspNet.Identity
 @model SocialGoal.Web.ViewModels.GroupViewModel
 @{
     ViewBag.Title = "Index";
@@ -28,7 +28,7 @@
             @if (Model.IsAMember == false)
             {
                 if (Model.RequestSent == false && Model.InvitationSent == false)
-                { 
+                {
                     @Html.ActionLink("Join Now", "GroupJoinRequest", "Group", new { id = Model.GroupId }, new { @class = "btn btn-primary btn-small", @style = "float:right" })
                 }
                 else if (Model.RequestSent == false && Model.InvitationSent == true)
@@ -47,8 +47,8 @@
                 }
             }
             @if (Model.IsAMember == true)
-            {       
-                @Html.Partial("Header")        
+            {
+                @Html.Partial("Header")
             }
         </div>
 </div>
@@ -79,7 +79,7 @@
         }
         <div style="max-height:270px;overflow-y:auto;" id="goallistcontainer">
         @foreach (var item in Model.Goals)
-        { 
+        {
                 <div>
                     @if (Model.IsAMember == true)
                     {<strong>@Html.ActionLink(item.GoalName, "GroupGoal", "Group", new { id = item.GroupGoalId }, null)</strong> }
@@ -89,7 +89,7 @@
                 <small>@item.StartDate.ToString("dd MMM yyyy") to @item.EndDate.ToString("dd MMM yyyy")</small>
                <div><small>Created By @Html.ActionLink(item.User.UserName, "UserProfile", "Account", new { id = item.UserId }, null)</small></div>
                     if (item.UserId == User.Identity.GetUserId())
-                    { 
+                    {
                     <div id="div@(item.GroupGoalId)" style="float:right;margin-right:10px;">
                         <a data-toggle="modal" href="#" id ="edit" onclick ="window.location.href='@Url.Action("EditGoal", "Group", new { id = item.GroupGoalId })'"@*editGet('@item.GoalId')*@>
                             <span rel="tooltip" title="Edit goals"><i class="icon-edit"></i></span></a><a href="#" id="delete" onclick ="window.location.href='@Url.Action("DeleteGoal", "Group", new { id = item.GroupGoalId })'"@*"DeleteGet('@item.GoalId')"*@>
@@ -97,7 +97,7 @@
                         </a>
                     </div>
                     }
-           
+
             <hr style="margin:22px 0px 0px 0px;" />
         }
         </div>
@@ -106,7 +106,7 @@
 <!--goal listing section ends-->
 
 <!--focus listing section-->
-<div class="span3 well"  style="margin-left:8px;height:350px;"> 
+<div class="span3 well"  style="margin-left:8px;height:350px;">
 
        <strong>Focus</strong><hr />
         @if (Model.Focus.Count() == 0)
@@ -115,10 +115,10 @@
         }
         <div style="max-height:270px;overflow-y:auto;" id="focuslistcontainer">
         @foreach (var item in Model.Focus)
-        {            
+        {
            <strong>@Html.ActionLink(item.FocusName, "Focus", "Group", new { id = item.FocusId }, null)</strong>
             if (Model.IsAMember == true)
-            { 
+            {
                 <div id="div@(item.FocusId)" style="float:right;margin-right:10px;">
                     <a data-toggle="modal" href="#" id ="edit" onclick ="window.location.href='@Url.Action("EditFocus", "Group", new { id = item.FocusId })'"@*editGet('@item.GoalId')*@>
                         <span rel="tooltip" title="Edit goals"><i class="icon-edit"></i></span></a>
@@ -126,7 +126,7 @@
                             <span rel="tooltip" title="Delete goals"><i class="icon-trash"></i></span></a>
                 </div>
             }
-            <hr />		
+            <hr />
         }
         </div>
 
@@ -136,21 +136,21 @@
 <!--focus listing section ends-->
 
 <!--members listing section-->
-<div class="span3 well"  style="margin-left:8px;height:350px;"> 
-        <strong>Members</strong><hr />       
+<div class="span3 well"  style="margin-left:8px;height:350px;">
+        <strong>Members</strong><hr />
         <div style="max-height:270px;overflow-y:auto;" id="memberlistcontainer">
         @foreach (var item in Model.Users)
-        { 
+        {
             <div style="margin-bottom:10px;">
             <div>
                 <a href="@Url.Action("UserProfile", "Account", new { id = item.Id }, null)" >
-                    @Html.User().Avatar(item.ProfilePicUrl, new { @class = "span2" })
+                    <img src="@item.ProfilePicUrl" class="span2" alt="Profile Picture" />
                 </a>
             </div>
              <div >
                 @if ((item.Id == User.Identity.GetUserId()) && (Model.Admin == false))
                 {
-                   <small> @Html.ActionLink("Unfollow", "DeleteMember", "Group", new { id = item.Id }, new { style = "float:right" })</small>					   
+                   <small> @Html.ActionLink("Unfollow", "DeleteMember", "Group", new { id = item.Id }, new { style = "float:right" })</small>
                 }
                 @if (Model.Admin == true && item.Id != User.Identity.GetUserId())
                 {
@@ -162,7 +162,7 @@
                 @Html.ActionLink(@item.UserName, "UserProfile", "Account", new { id = item.Id }, null)
                 <div><small> @item.Email </small></div>
             </div>
-           
+
             </div>
           		<hr style="margin:22px 0px 0px 0px;" />
         }
@@ -174,19 +174,19 @@
 
 
 <!--Right section -->
-<div class="span3" >    
+<div class="span3" >
     <div class="well span12" style="margin-left:0px;padding:15px;">
         <strong>Goals Assigned By Me</strong><hr />
         @if (Model.GoalsAssignedToOthers == null)
-        {  
-           <div class="alert alert-info">No results to display</div>      
+        {
+           <div class="alert alert-info">No results to display</div>
         }
         else
         {
             foreach (var item in Model.GoalsAssignedToOthers)
             {
                 @Html.ActionLink(item.GoalName, "GroupGoal", "Group", new { id = item.GroupGoalId }, null)
-                <div><small>Assigned on @item.CreatedDate.ToString("dd MMM yyyy -   hh:mm tt ")</small></div>    
+                <div><small>Assigned on @item.CreatedDate.ToString("dd MMM yyyy -   hh:mm tt ")</small></div>
             <hr/>
             }
         }
@@ -194,8 +194,8 @@
     <div class="well span12" style="margin-left:0px;padding:15px;">
         <strong> Goals Assigned To Me</strong><hr />
         @if (Model.GoalsAssignedToMe == null)
-        {       
-            <div class="alert alert-info">No results to display</div>             
+        {
+            <div class="alert alert-info">No results to display</div>
         }
         else
         {
@@ -225,7 +225,7 @@
         $('#focuslistcontainer').niceScroll();
         $('#memberlistcontainer').niceScroll();
 
-        
+
     });
-   
+
 </script>

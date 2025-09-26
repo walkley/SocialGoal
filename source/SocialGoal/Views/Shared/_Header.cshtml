@@ -1,5 +1,5 @@
-﻿@using Microsoft.AspNet.Identity
-@if (Request.IsAuthenticated)
+@using Microsoft.AspNet.Identity
+@if (User.Identity.IsAuthenticated)
 {
     <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse"><span
         class="icon-bar"></span><span class="icon-bar"></span><span class="icon-bar"></span>
@@ -21,15 +21,15 @@
             <li>@Html.ActionLink("Sign Out","LogOff","Account")</li>
         </ul>
     </div>
-    
+
     <div class="nav-collapse">
         <ul class="nav">
             <li><a href="/Home/Index">Home</a></li>
             <li><a href="/Notification/Index">My Invitations
                 @{
-    var not = Html.Action("GetNumberOfInvitations", "Notification");
+    var not = await Component.InvokeAsync("GetNumberOfInvitations");
     if (not.ToString() != "0")
-    { 
+    {
                     <sup><span class="badge badge-important">@not</span> </sup>
     }
                 }
@@ -62,7 +62,7 @@
             </li>
         </ul>
     </div>
-    
+
 }
 
 <link href="/Content/CustomStyles.css" rel="stylesheet" type="text/css" />

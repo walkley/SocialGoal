@@ -1,19 +1,20 @@
-﻿using Microsoft.AspNet.Identity;
-using Microsoft.AspNet.Identity.EntityFramework;
 using SocialGoal.Model.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Identity;
+
 
 namespace SocialGoal.Tests.Helpers
 {
     public class TestUserStore : IUserStore<ApplicationUser>, IUserLoginStore<ApplicationUser>, IUserRoleStore<ApplicationUser>, IUserClaimStore<ApplicationUser>, IUserPasswordStore<ApplicationUser>, IUserSecurityStampStore<ApplicationUser>
     {
         private Dictionary<string, ApplicationUser> _users;
-        private Dictionary<IdentityUserLogin, ApplicationUser> _logins = new Dictionary<IdentityUserLogin, ApplicationUser>();
+        private Dictionary<UserLoginInfo, ApplicationUser> _logins = new Dictionary<UserLoginInfo, ApplicationUser>();
 
 
         public TestUserStore()
@@ -33,11 +34,11 @@ namespace SocialGoal.Tests.Helpers
           _users[user.Id] = user;
             return Task.FromResult(0);
         }
-       
-        public Task CreateAsync(ApplicationUser user)
-        { 
+
+        public Task<IdentityResult> CreateAsync(ApplicationUser user, CancellationToken cancellationToken = default)
+        {
             _users[user.Id]=user;
-            return Task.FromResult(0);
+            return Task.FromResult(IdentityResult.Success);
         }
         public Task UpdateAsync(ApplicationUser user)
         {
@@ -81,9 +82,8 @@ namespace SocialGoal.Tests.Helpers
             return Task.FromResult<ApplicationUser>(null);
         }
 
-        public Task AddLoginAsync(ApplicationUser user, IdentityUserLogin login)
+        public Task AddLoginAsync(ApplicationUser user, UserLoginInfo login, CancellationToken cancellationToken = default)
         {
-            user.Logins.Add(login);
             _logins[login] = user;
             return Task.FromResult(0);
         }
@@ -92,15 +92,11 @@ namespace SocialGoal.Tests.Helpers
         {
             throw new NotImplementedException();
         }
-        public Task RemoveLoginAsync(ApplicationUser user, IdentityUserLogin login)
+        public Task RemoveLoginAsync(ApplicationUser user, IdentityUserLogin<string> login)
         {
-            var logs = user.Logins.Where(l => l.ProviderKey == login.ProviderKey && l.LoginProvider == login.LoginProvider).ToList();
-            foreach (var l in logs)
-            {
-                user.Logins.Remove(l);
-                _logins[l] = null;
-            }
-            return Task.FromResult(0);
+            // In ASP.NET Core Identity, user logins are managed by the store
+            // This method is obsolete and replaced by RemoveLoginAsync with loginProvider and providerKey parameters
+            throw new NotImplementedException();
         }
 
         public Task RemoveLoginAsync(ApplicationUser user, UserLoginInfo login)
@@ -113,7 +109,7 @@ namespace SocialGoal.Tests.Helpers
             throw new NotImplementedException();
         }
 
-        public Task<ApplicationUser> FindAsync(IdentityUserLogin login)
+        public Task<ApplicationUser> FindAsync(UserLoginInfo login)
         {
             if (_logins.ContainsKey(login))
             {
@@ -122,15 +118,19 @@ namespace SocialGoal.Tests.Helpers
             return Task.FromResult<ApplicationUser>(null);
         }
 
-        
-        public Task<ApplicationUser> FindAsync(UserLoginInfo login)
+
+        public Task<ApplicationUser> FindByLoginAsync(string loginProvider, string providerKey, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var login = _logins.Keys.FirstOrDefault(l => l.LoginProvider == loginProvider && l.ProviderKey == providerKey);
+            if (login != null && _logins.ContainsKey(login))
+            {
+                return Task.FromResult(_logins[login]);
+            }
+            return Task.FromResult<ApplicationUser>(null);
         }
 
-        public Task AddToRoleAsync(ApplicationUser user, IdentityUserRole role)
+        public Task AddToRoleAsync(ApplicationUser user, string roleName, CancellationToken cancellationToken = default)
         {
-            user.Roles.Add(role);
             return Task.FromResult(0);
         }
 
@@ -138,9 +138,8 @@ namespace SocialGoal.Tests.Helpers
         {
             throw new NotImplementedException();
         }
-        public Task RemoveFromRoleAsync(ApplicationUser user, IdentityUserRole role)
+        public Task RemoveFromRoleAsync(ApplicationUser user, string roleName, CancellationToken cancellationToken = default)
         {
-            user.Roles.Remove(role);
             return Task.FromResult(0);
         }
 
@@ -149,24 +148,28 @@ namespace SocialGoal.Tests.Helpers
             throw new NotImplementedException();
         }
 
-        public Task<IList<string>> GetRolesAsync(ApplicationUser user)
-        {
-            return Task.FromResult<IList<string>>(new List<string>());
-        }
+public Task<IList<string>> GetRolesAsync(ApplicationUser user, CancellationToken cancellationToken = default)
+{
+    return Task.FromResult<IList<string>>(new List<string>());
+}
 
-        public Task<bool> IsInRoleAsync(ApplicationUser user, string role)
-        {
-            return Task.FromResult<bool>(true);
-        }
+public Task<bool> IsInRoleAsync(ApplicationUser user, string roleName, CancellationToken cancellationToken = default)
+{
+    return Task.FromResult<bool>(true);
+}
 
-        public Task<IList<Claim>> GetClaimsAsync(ApplicationUser user)
+public Task<IList<ApplicationUser>> GetUsersInRoleAsync(string roleName, CancellationToken cancellationToken = default)
+{
+    return Task.FromResult<IList<ApplicationUser>>(new List<ApplicationUser>());
+}
+
+        public Task<IList<Claim>> GetClaimsAsync(ApplicationUser user, CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IList<Claim>>(new List<Claim>());
         }
 
-        public Task AddClaimAsync(ApplicationUser user, IdentityUserClaim claim)
+        public Task AddClaimAsync(ApplicationUser user, Claim claim, CancellationToken cancellationToken = default)
         {
-            user.Claims.Add(claim);
             return Task.FromResult(0);
         }
 
@@ -175,9 +178,8 @@ namespace SocialGoal.Tests.Helpers
             throw new NotImplementedException();
         }
 
-        public Task RemoveClaimAsync(ApplicationUser user, IdentityUserClaim claim)
+        public Task RemoveClaimAsync(ApplicationUser user, Claim claim, CancellationToken cancellationToken = default)
         {
-            user.Claims.Remove(claim);
             return Task.FromResult(0);
         }
 
@@ -187,36 +189,128 @@ namespace SocialGoal.Tests.Helpers
             throw new NotImplementedException();
         }
 
-        public Task SetPasswordHashAsync(ApplicationUser user, string passwordHash)
+public Task AddClaimsAsync(ApplicationUser user, IEnumerable<Claim> claims, CancellationToken cancellationToken)
+{
+    return Task.CompletedTask;
+}
+
+public Task RemoveClaimsAsync(ApplicationUser user, IEnumerable<Claim> claims, CancellationToken cancellationToken)
+{
+    return Task.CompletedTask;
+}
+
+public Task<IList<ApplicationUser>> GetUsersForClaimAsync(Claim claim, CancellationToken cancellationToken)
+{
+    return Task.FromResult<IList<ApplicationUser>>(new List<ApplicationUser>());
+}
+
+        public Task SetPasswordHashAsync(ApplicationUser user, string passwordHash, CancellationToken cancellationToken = default)
         {
             user.PasswordHash = passwordHash;
             return Task.FromResult(0);
         }
 
-        public Task<string> GetPasswordHashAsync(ApplicationUser user)
+        public Task<string> GetPasswordHashAsync(ApplicationUser user, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(user.PasswordHash);
         }
 
-        public Task SetSecurityStampAsync(ApplicationUser user, string stamp)
+        public Task SetSecurityStampAsync(ApplicationUser user, string stamp, CancellationToken cancellationToken = default)
         {
             user.SecurityStamp = stamp;
             return Task.FromResult(0);
         }
 
-        public Task<string> GetSecurityStampAsync(ApplicationUser user)
+        public Task<string> GetSecurityStampAsync(ApplicationUser user, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(user.SecurityStamp);
         }
 
-        public Task DeleteAsync(ApplicationUser user)
+        public Task<IdentityResult> DeleteAsync(ApplicationUser user, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            if (_users.ContainsKey(user.Id))
+            {
+                _users.Remove(user.Id);
+            }
+            return Task.FromResult(IdentityResult.Success);
         }
 
-        public Task<bool> HasPasswordAsync(ApplicationUser user)
-        {
-            return Task.FromResult(user.PasswordHash != null);
-        }
+public Task<bool> HasPasswordAsync(ApplicationUser user, CancellationToken cancellationToken = default)
+{
+    return Task.FromResult(user.PasswordHash != null);
+}
+
+public Task<string> GetUserIdAsync(ApplicationUser user, CancellationToken cancellationToken)
+{
+    return Task.FromResult(user.Id);
+}
+
+public Task<string> GetUserNameAsync(ApplicationUser user, CancellationToken cancellationToken)
+{
+    return Task.FromResult(user.UserName);
+}
+
+public Task SetUserNameAsync(ApplicationUser user, string userName, CancellationToken cancellationToken)
+{
+    user.UserName = userName;
+    return Task.FromResult(0);
+}
+
+public Task<string> GetNormalizedUserNameAsync(ApplicationUser user, CancellationToken cancellationToken)
+{
+    return Task.FromResult(user.NormalizedUserName ?? user.UserName.ToUpper());
+}
+
+public Task SetNormalizedUserNameAsync(ApplicationUser user, string normalizedName, CancellationToken cancellationToken)
+{
+    user.NormalizedUserName = normalizedName;
+    return Task.FromResult(0);
+}
+
+public Task RemoveLoginAsync(ApplicationUser user, string loginProvider, string providerKey, CancellationToken cancellationToken)
+{
+    var login = _logins.Keys.FirstOrDefault(l => l.LoginProvider == loginProvider && l.ProviderKey == providerKey);
+    if (login != null && _logins.ContainsKey(login))
+    {
+        _logins.Remove(login);
+    }
+    return Task.FromResult(0);
+}
+
+public Task<IList<UserLoginInfo>> GetLoginsAsync(ApplicationUser user, CancellationToken cancellationToken)
+{
+    IList<UserLoginInfo> logins = _logins.Where(l => l.Value.Id == user.Id).Select(l => l.Key).ToList();
+    return Task.FromResult(logins);
+}
+
+public Task ReplaceClaimAsync(ApplicationUser user, Claim claim, Claim newClaim, CancellationToken cancellationToken)
+{
+    return Task.CompletedTask;
+}
+
+public Task<ApplicationUser> FindByIdAsync(string userId, CancellationToken cancellationToken)
+{
+    if (_users.ContainsKey(userId))
+    {
+        return Task.FromResult(_users[userId]);
+    }
+    return Task.FromResult<ApplicationUser>(null);
+}
+
+public Task<ApplicationUser> FindByNameAsync(string normalizedUserName, CancellationToken cancellationToken)
+{
+    foreach (ApplicationUser user in _users.Values)
+    {
+        if ((user.NormalizedUserName ?? user.UserName.ToUpper()) == normalizedUserName)
+            return Task.FromResult(user);
+    }
+    return Task.FromResult<ApplicationUser>(null);
+}
+
+public Task<IdentityResult> UpdateAsync(ApplicationUser user, CancellationToken cancellationToken)
+{
+    _users[user.Id] = user;
+    return Task.FromResult(IdentityResult.Success);
+}
     }
 }

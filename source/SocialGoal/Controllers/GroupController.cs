@@ -1,4 +1,4 @@
-﻿using System.Drawing.Drawing2D;
+using System.Drawing.Drawing2D;
 using AutoMapper;
 using PagedList;
 using SocialGoal.Data.Infrastructure;
@@ -10,11 +10,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
-using System.Web.Mvc;
 using SocialGoal.Web.Core.Extensions;
 using SocialGoal.Web.Mailers;
 using SocialGoal.Properties;
-using Microsoft.AspNet.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using AutoMapper;
+
 
 namespace SocialGoal.Web.Controllers
 {
@@ -37,6 +41,8 @@ namespace SocialGoal.Web.Controllers
         private readonly IGroupCommentUserService groupCommentUserService;
         private readonly IGroupUpdateSupportService groupUpdateSupportService;
         private readonly IGroupUpdateUserService groupUpdateUserService;
+        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly IMapper _mapper;
 
         private IUserMailer userMailer = new UserMailer();
         public IUserMailer UserMailer
@@ -45,7 +51,7 @@ namespace SocialGoal.Web.Controllers
             set { userMailer = value; }
         }
 
-        public GroupController(IGroupService groupService, IGroupUserService groupUserService, IUserService userService, IMetricService metricService, IFocusService focusService, IGroupGoalService groupgoalService, IGroupInvitationService groupInvitationService, ISecurityTokenService securityTokenService, IGroupUpdateService groupUpdateService, IGroupCommentService groupCommentService, IGoalStatusService goalStatusService, IGroupRequestService groupRequestService, IFollowUserService followUserService, IGroupCommentUserService groupCommentUserService, IGroupUpdateSupportService groupUpdateSupportService, IGroupUpdateUserService groupUpdateUserService)
+        public GroupController(IGroupService groupService, IGroupUserService groupUserService, IUserService userService, IMetricService metricService, IFocusService focusService, IGroupGoalService groupgoalService, IGroupInvitationService groupInvitationService, ISecurityTokenService securityTokenService, IGroupUpdateService groupUpdateService, IGroupCommentService groupCommentService, IGoalStatusService goalStatusService, IGroupRequestService groupRequestService, IFollowUserService followUserService, IGroupCommentUserService groupCommentUserService, IGroupUpdateSupportService groupUpdateSupportService, IGroupUpdateUserService groupUpdateUserService, UserManager<ApplicationUser> userManager, IMapper mapper)
         {
             this.groupService = groupService;
             this.groupInvitationService = groupInvitationService;
@@ -63,14 +69,16 @@ namespace SocialGoal.Web.Controllers
             this.groupCommentUserService = groupCommentUserService;
             this.groupUpdateSupportService = groupUpdateSupportService;
             this.groupUpdateUserService = groupUpdateUserService;
+            this._userManager = userManager;
+            this._mapper = mapper;
         }
         //
         // GET: /Group/
 
         public ViewResult Index(int id)
         {
-            GroupViewModel group = Mapper.Map<Group, GroupViewModel>(groupService.GetGroup(id));
-            group.Goals = Mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetGroupGoals(id));
+            GroupViewModel group = _mapper.Map<Group, GroupViewModel>(groupService.GetGroup(id));
+            group.Goals = _mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetGroupGoals(id));
 
             foreach (var item in group.Goals)
             {
@@ -79,44 +87,44 @@ namespace SocialGoal.Web.Controllers
                 item.UserId = user.Id;
                 item.User = user;
             }
-            var assignedgroupuser = groupUserService.GetGroupUser(User.Identity.GetUserId(), id);
+            var assignedgroupuser = groupUserService.GetGroupUser(_userManager.GetUserId(User), id);
             if (assignedgroupuser != null)
             {
-                group.GoalsAssignedToOthers = Mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetAssignedGoalsToOthers(assignedgroupuser.GroupUserId));
-                group.GoalsAssignedToMe = Mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetAssignedGoalsToMe(assignedgroupuser.GroupUserId));
+                group.GoalsAssignedToOthers = _mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetAssignedGoalsToOthers(assignedgroupuser.GroupUserId));
+                group.GoalsAssignedToMe = _mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetAssignedGoalsToMe(assignedgroupuser.GroupUserId));
             }
             group.Focus = focusService.GetFocussOFGroup(id);
 
             //group.GroupUserId = groupUserService.GetGroupUserByuserId(((SocialGoalUser)(User.Identity)).UserId).GroupUserId;
             group.Users = groupUserService.GetMembersOfGroup(id);
             //if (group.GroupUser.UserId == ((SocialGoalUser)(User.Identity)).UserId)
-            if (groupUserService.GetAdminId(id) == User.Identity.GetUserId())
+            if (groupUserService.GetAdminId(id) == _userManager.GetUserId(User))
                 group.Admin = true;
             var status = 0;
             foreach (var item in group.Users)
             {
-                if (item.Id == (User.Identity.GetUserId()))
+                if (item.Id == _userManager.GetUserId(User))
                     status = 1;
             }
             if (status == 1)
                 group.IsAMember = true;
-            if (groupRequestService.RequestSent((User.Identity.GetUserId()), id))
+            if (groupRequestService.RequestSent(_userManager.GetUserId(User), id))
                 group.RequestSent = true;
-            if (groupInvitationService.IsUserInvited(id, (User.Identity.GetUserId())))
+            if (groupInvitationService.IsUserInvited(id, _userManager.GetUserId(User)))
                 group.InvitationSent = true;
             return View("Index", group);
         }
 
         public ViewResult MyGroups()
         {
-            var groupids = groupUserService.GetGroupAdminUsers(User.Identity.GetUserId());
+            var groupids = groupUserService.GetGroupAdminUsers(_userManager.GetUserId(User));
             var allGroups = groupService.GetGroups(groupids);
             return View(allGroups);
         }
 
         public ViewResult Following()
         {
-            var groupids = groupUserService.GetFollowedGroups(User.Identity.GetUserId());
+            var groupids = groupUserService.GetFollowedGroups(_userManager.GetUserId(User));
             var allGroups = groupService.GetGroups(groupids);
             return View(allGroups);
         }
@@ -139,7 +147,7 @@ namespace SocialGoal.Web.Controllers
         public ViewResult ShowAllRequests(int id)
         {
             var groupRequests = groupRequestService.GetGroupRequests(id);
-            var groupRequestViewModel = Mapper.Map<IEnumerable<GroupRequest>, IEnumerable<GroupRequestViewModel>>(groupRequests);
+            var groupRequestViewModel = _mapper.Map<IEnumerable<GroupRequest>, IEnumerable<GroupRequestViewModel>>(groupRequests);
             ViewBag.CurrentGroupID = id;
             return View("_RequestsView", groupRequestViewModel);
         }
@@ -164,8 +172,8 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult CreateGroup(GroupFormModel newGroup)
         {
-            var userId = User.Identity.GetUserId();
-            Group group = Mapper.Map<GroupFormModel, Group>(newGroup);
+            var userId = _userManager.GetUserId(User);
+            Group group = _mapper.Map<GroupFormModel, Group>(newGroup);
             var errors = groupService.CanAddGroup(group).ToList();
             ModelState.AddModelErrors(errors);
             if (ModelState.IsValid)
@@ -185,10 +193,10 @@ namespace SocialGoal.Web.Controllers
         public ActionResult EditGroup(int id)
         {
             var group = groupService.GetGroup(id);
-            GroupFormModel editGroup = Mapper.Map<Group, GroupFormModel>(group);
+            GroupFormModel editGroup = _mapper.Map<Group, GroupFormModel>(group);
             if (group == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return View("_EditGroup", editGroup);
         }
@@ -201,12 +209,12 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult CreateFocus(FocusFormModel focus)
         {
-            var errors = focusService.CanAddFocus(Mapper.Map<FocusFormModel, Focus>(focus)).ToList();
+            var errors = focusService.CanAddFocus(_mapper.Map<FocusFormModel, Focus>(focus)).ToList();
 
             ModelState.AddModelErrors(errors);
             if (ModelState.IsValid)
             {
-                Focus newFocus = Mapper.Map<FocusFormModel, Focus>(focus);
+                Focus newFocus = _mapper.Map<FocusFormModel, Focus>(focus);
                 focusService.CreateFocus(newFocus);
                 //var createdfocus = focusService.GetFocus(focus.FocusName);
                 return RedirectToAction("Focus", new { id = newFocus.FocusId });
@@ -216,8 +224,8 @@ namespace SocialGoal.Web.Controllers
 
         public ActionResult Focus(int id)
         {
-            FocusViewModel Focus = Mapper.Map<Focus, FocusViewModel>(focusService.GetFocus(id));
-            Focus.GroupGoal = Mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetGroupGoalsByFocus(id));
+            FocusViewModel Focus = _mapper.Map<Focus, FocusViewModel>(focusService.GetFocus(id));
+            Focus.GroupGoal = _mapper.Map<IEnumerable<GroupGoal>, IEnumerable<GroupGoalViewModel>>(groupGoalService.GetGroupGoalsByFocus(id));
             foreach (var item in Focus.GroupGoal)
             {
                 var user = userService.GetUser(item.GroupUser.UserId);
@@ -229,7 +237,7 @@ namespace SocialGoal.Web.Controllers
             var status = 0;
             foreach (var item in Focus.Users)
             {
-                if (item.Id == (User.Identity.GetUserId()))
+                if (item.Id == _userManager.GetUserId(User))
                 {
                     status = 1;
                 }
@@ -244,10 +252,10 @@ namespace SocialGoal.Web.Controllers
         public ActionResult EditFocus(int id)
         {
             var Focus = focusService.GetFocus(id);
-            FocusFormModel editFocus = Mapper.Map<Focus, FocusFormModel>(Focus);
+            FocusFormModel editFocus = _mapper.Map<Focus, FocusFormModel>(Focus);
             if (Focus == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return View("EditFocus", editFocus);
         }
@@ -257,7 +265,7 @@ namespace SocialGoal.Web.Controllers
             var focus = focusService.GetFocus(id);
             if (focus == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return View(focus);
         }
@@ -268,7 +276,7 @@ namespace SocialGoal.Web.Controllers
             var Focus = focusService.GetFocus(id);
             if (Focus == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             focusService.DeleteFocus(id);
             return RedirectToAction("Index", "Group", new { id = Focus.GroupId });
@@ -277,7 +285,7 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult EditFocus(FocusFormModel focusFormViewModel)
         {
-            Focus focus = Mapper.Map<FocusFormModel, Focus>(focusFormViewModel);
+            Focus focus = _mapper.Map<FocusFormModel, Focus>(focusFormViewModel);
             focus.Group = groupService.GetGroup(focus.GroupId);
             var errors = focusService.CanAddFocus(focus).ToList();
             ModelState.AddModelErrors(errors);
@@ -294,7 +302,7 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult EditGroup(GroupFormModel groupFormViewModel)
         {
-            Group group = Mapper.Map<GroupFormModel, Group>(groupFormViewModel);
+            Group group = _mapper.Map<GroupFormModel, Group>(groupFormViewModel);
             var errors = groupService.CanAddGroup(group).ToList();
             ModelState.AddModelErrors(errors);
             if (ModelState.IsValid)
@@ -313,7 +321,7 @@ namespace SocialGoal.Web.Controllers
             var group = groupService.GetGroup(id);
             if (group == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return View("_DeleteGroup", group);
         }
@@ -324,7 +332,7 @@ namespace SocialGoal.Web.Controllers
             var group = groupService.GetGroup(id);
             if (group == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             groupService.DeleteGroup(id);
             groupUserService.DeleteGroupUserByGroupId(id);
@@ -345,8 +353,8 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult CreateGoal(GroupGoalFormModel goal)
         {
-            GroupGoal groupgoal = Mapper.Map<GroupGoalFormModel, GroupGoal>(goal);
-            var groupUser = groupUserService.GetGroupUser(User.Identity.GetUserId(), goal.GroupId);
+            GroupGoal groupgoal = _mapper.Map<GroupGoalFormModel, GroupGoal>(goal);
+            var groupUser = groupUserService.GetGroupUser(_userManager.GetUserId(User), goal.GroupId);
             groupgoal.GroupUserId = groupUser.GroupUserId;
             //groupgoal.GroupUser = groupUser;
             //if (groupgoal.AssignedTo == null)
@@ -372,7 +380,7 @@ namespace SocialGoal.Web.Controllers
         public ViewResult EditGoal(int id)
         {
             var goal = groupGoalService.GetGroupGoal(id);
-            GroupGoalFormModel editGoal = Mapper.Map<GroupGoal, GroupGoalFormModel>(goal);
+            GroupGoalFormModel editGoal = _mapper.Map<GroupGoal, GroupGoalFormModel>(goal);
             var metrics = metricService.GetMetrics();
             var focuss = focusService.GetFocussOFGroup(goal.GroupUser.GroupId);
             if (goal.Metric != null)
@@ -389,7 +397,7 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult EditGoal(GroupGoalFormModel editGoal)
         {
-            GroupGoal groupGoal = Mapper.Map<GroupGoalFormModel, GroupGoal>(editGoal);
+            GroupGoal groupGoal = _mapper.Map<GroupGoalFormModel, GroupGoal>(editGoal);
             var errors = groupGoalService.CanAddGoal(groupGoal, groupUpdateService);
             ModelState.AddModelErrors(errors);
             if (ModelState.IsValid)
@@ -422,7 +430,7 @@ namespace SocialGoal.Web.Controllers
             var goal = groupGoalService.GetGroupGoal(id);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return View(goal);
         }
@@ -433,7 +441,7 @@ namespace SocialGoal.Web.Controllers
             var goal = groupGoalService.GetGroupGoal(id);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
 
             groupGoalService.DeleteGroupGoal(id);
@@ -445,9 +453,9 @@ namespace SocialGoal.Web.Controllers
             var goal = groupGoalService.GetGroupGoal(id);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
-            var goalDetails = Mapper.Map<GroupGoal, GroupGoalViewModel>(goal);
+            var goalDetails = _mapper.Map<GroupGoal, GroupGoalViewModel>(goal);
             var user = userService.GetUser(goalDetails.GroupUser.UserId);
             goalDetails.UserId = user.Id;
             goalDetails.User = user;
@@ -470,7 +478,7 @@ namespace SocialGoal.Web.Controllers
             var status = 0;
             foreach (var item in goalDetails.Users)
             {
-                if (item.Id == User.Identity.GetUserId())
+                if (item.Id == _userManager.GetUserId(User))
                 {
                     status = 1;
                 }
@@ -488,13 +496,13 @@ namespace SocialGoal.Web.Controllers
 
             if (ModelState.IsValid)
             {
-                GroupUpdate update = Mapper.Map<GroupUpdateFormModel, GroupUpdate>(newupdate);
-                var userId = User.Identity.GetUserId();
+                GroupUpdate update = _mapper.Map<GroupUpdateFormModel, GroupUpdate>(newupdate);
+                var userId = _userManager.GetUserId(User);
                 groupUpdateService.CreateUpdate(update, userId);
-                var Updates = Mapper.Map<IEnumerable<GroupUpdate>, IEnumerable<GroupUpdateViewModel>>(groupUpdateService.GetUpdatesByGoal(newupdate.GroupGoalId));
+                var Updates = _mapper.Map<IEnumerable<GroupUpdate>, IEnumerable<GroupUpdateViewModel>>(groupUpdateService.GetUpdatesByGoal(newupdate.GroupGoalId));
                 foreach (var item in Updates)
                 {
-                    item.IsSupported = groupUpdateSupportService.IsUpdateSupported(item.GroupUpdateId, User.Identity.GetUserId(), groupUserService);
+                    item.IsSupported = groupUpdateSupportService.IsUpdateSupported(item.GroupUpdateId, _userManager.GetUserId(User), groupUserService);
                     item.UserId = groupUpdateUserService.GetGroupUpdateUser(item.GroupUpdateId).Id;
                 }
                 GroupUpdateListViewModel updates = new GroupUpdateListViewModel()
@@ -511,13 +519,13 @@ namespace SocialGoal.Web.Controllers
 
         public PartialViewResult DisplayUpdates(int id)
         {
-            var Updates = Mapper.Map<IEnumerable<GroupUpdate>, IEnumerable<GroupUpdateViewModel>>(groupUpdateService.GetUpdatesByGoal(id));
+            var Updates = _mapper.Map<IEnumerable<GroupUpdate>, IEnumerable<GroupUpdateViewModel>>(groupUpdateService.GetUpdatesByGoal(id));
 
             foreach (var item in Updates)
             {
 
 
-                item.IsSupported = groupUpdateSupportService.IsUpdateSupported(item.GroupUpdateId, User.Identity.GetUserId(), groupUserService);
+                item.IsSupported = groupUpdateSupportService.IsUpdateSupported(item.GroupUpdateId, _userManager.GetUserId(User), groupUserService);
                 item.UserId = groupUpdateUserService.GetGroupUpdateUser(item.GroupUpdateId).Id;
             }
             GroupUpdateListViewModel updates = new GroupUpdateListViewModel()
@@ -532,7 +540,7 @@ namespace SocialGoal.Web.Controllers
         public PartialViewResult DisplayComments(int id)
         {
             var comments = groupCommentService.GetCommentsByUpdate(id);
-            IEnumerable<GroupCommentsViewModel> commentsView = Mapper.Map<IEnumerable<GroupComment>, IEnumerable<GroupCommentsViewModel>>(comments);
+            IEnumerable<GroupCommentsViewModel> commentsView = _mapper.Map<IEnumerable<GroupComment>, IEnumerable<GroupCommentsViewModel>>(comments);
             foreach (var item in commentsView)
             {
                 var groupCommentUser = groupCommentUserService.GetCommentUser(item.GroupCommentId);
@@ -548,8 +556,8 @@ namespace SocialGoal.Web.Controllers
         {
             if (ModelState.IsValid)
             {
-                var userId = User.Identity.GetUserId();
-                var comment = Mapper.Map<GroupCommentFormModel, GroupComment>(newcomment);
+                var userId = _userManager.GetUserId(User);
+                var comment = _mapper.Map<GroupCommentFormModel, GroupComment>(newcomment);
                 groupCommentService.CreateComment(comment, userId);
 
             }
@@ -560,7 +568,7 @@ namespace SocialGoal.Web.Controllers
         public JsonResult DisplayCommentCount(int id)
         {
             int commentcount = groupCommentService.GetCommentsByUpdate(id).Count();
-            return Json(commentcount, JsonRequestBehavior.AllowGet);
+            return Json(commentcount);
         }
 
 
@@ -572,7 +580,7 @@ namespace SocialGoal.Web.Controllers
         public JsonResult SearchUserForGroup(string username, int groupId)
         {
             return Json(from g in groupUserService.SearchUserForGroup(username, groupId, userService, groupInvitationService)
-                        select new { label = g.UserName + ", " + g.Email, value = g.UserName, id = g.Id }, JsonRequestBehavior.AllowGet);
+                        select new { label = g.UserName + ", " + g.Email, value = g.UserName, id = g.Id });
         }
 
         public int NoOfUsers(int id)
@@ -585,7 +593,7 @@ namespace SocialGoal.Web.Controllers
             GroupInvitation newInvitation = new GroupInvitation()
             {
                 GroupId = id,
-                FromUserId = User.Identity.GetUserId(),
+                FromUserId = _userManager.GetUserId(User),
                 ToUserId = UserId,
                 SentDate = DateTime.Now
             };
@@ -597,7 +605,7 @@ namespace SocialGoal.Web.Controllers
         public ViewResult InviteUsers(int id)
         {
             var group = groupService.GetGroup(id);
-            GroupViewModel invGroup = Mapper.Map<Group, GroupViewModel>(group);
+            GroupViewModel invGroup = _mapper.Map<Group, GroupViewModel>(group);
             return View("_InviteUsers", invGroup);
         }
 
@@ -612,12 +620,12 @@ namespace SocialGoal.Web.Controllers
             var newGroupUser = new GroupUser()
             {
                 Admin = false,
-                UserId = User.Identity.GetUserId(),
+                UserId = _userManager.GetUserId(User),
                 GroupId = id
             };
             groupUserService.CreateGroupUser(newGroupUser, groupInvitationService);
-            if (groupRequestService.RequestSent(User.Identity.GetUserId(), id))
-                groupRequestService.DeleteGroupRequest(User.Identity.GetUserId(), id);
+            if (groupRequestService.RequestSent(_userManager.GetUserId(User), id))
+                groupRequestService.DeleteGroupRequest(_userManager.GetUserId(User), id);
             return RedirectToAction("Index", new { id = id });
         }
 
@@ -625,10 +633,10 @@ namespace SocialGoal.Web.Controllers
         {
             var groupRequestFormModel = new GroupRequestFormModel()
             {
-                UserId = User.Identity.GetUserId(),
+                UserId = _userManager.GetUserId(User),
                 GroupId = id
             };
-            var groupRequest = Mapper.Map<GroupRequestFormModel, GroupRequest>(groupRequestFormModel);
+            var groupRequest = _mapper.Map<GroupRequestFormModel, GroupRequest>(groupRequestFormModel);
             groupRequestService.CreateGroupRequest(groupRequest);
             return RedirectToAction("Index", new { id = groupRequestFormModel.GroupId });
         }
@@ -660,9 +668,9 @@ namespace SocialGoal.Web.Controllers
 
         public PartialViewResult GroupsView()
         {
-            var groupIds = groupUserService.GetGroupAdminUsers(User.Identity.GetUserId());
+            var groupIds = groupUserService.GetGroupAdminUsers(_userManager.GetUserId(User));
             var groups = groupService.GetGroupsForUser(groupIds);
-            var groupsList = Mapper.Map<IEnumerable<Group>, IEnumerable<GroupsItemViewModel>>(groups);
+            var groupsList = _mapper.Map<IEnumerable<Group>, IEnumerable<GroupsItemViewModel>>(groups);
             return PartialView("_GroupView", groupsList);
         }
 
@@ -674,7 +682,7 @@ namespace SocialGoal.Web.Controllers
         public PartialViewResult FollowedGroups()
         {
             List<Group> groups = new List<Group> { };
-            var groupids = groupUserService.GetFollowedGroups(User.Identity.GetUserId());
+            var groupids = groupUserService.GetFollowedGroups(_userManager.GetUserId(User));
             foreach (var item in groupids)
             {
                 var group = groupService.GetGroup(item);
@@ -721,7 +729,7 @@ namespace SocialGoal.Web.Controllers
                 Data = (from g in groupUpdateService.GetUpdatesWithStatus(id).OrderBy(u => u.UpdateDate)
                         select new { Date = g.UpdateDate.ToString(), Value = g.status }),
                 Target = new { EndDate = goal.EndDate.ToString(), Target = (goal.Target != null) ? goal.Target : 100 }
-            }, JsonRequestBehavior.AllowGet);
+            });
         }
 
 
@@ -754,20 +762,20 @@ namespace SocialGoal.Web.Controllers
             }
             else if (filter == 1)
             {
-                var userIds = followUserService.GetFollowingUsers(User.Identity.GetUserId());
+                var userIds = followUserService.GetFollowingUsers(_userManager.GetUserId(User));
                 var groupIds = groupUserService.GetGroupUsers(userIds);
                 var groups = groupService.GetGroups(groupIds);
                 return PartialView("_Groupslist", groups);
             }
             else if (filter == 2)
             {
-                var groupIds = groupUserService.GetGroupAdminUsers(User.Identity.GetUserId());
+                var groupIds = groupUserService.GetGroupAdminUsers(_userManager.GetUserId(User));
                 var group = groupService.GetGroupsForUser(groupIds);
                 return PartialView("_Groupslist", group);
             }
             else if (filter == 3)
             {
-                var groupids = groupUserService.GetFollowedGroups(User.Identity.GetUserId());
+                var groupids = groupUserService.GetFollowedGroups(_userManager.GetUserId(User));
                 var allGroups = groupService.GetGroups(groupids);
                 return PartialView("_Groupslist", allGroups);
             }
@@ -775,7 +783,7 @@ namespace SocialGoal.Web.Controllers
         }
 
         /// <summary>
-        /// Action to load groups list 
+        /// Action to load groups list
         /// </summary>
         /// <param name="filter"></param>
         /// <param name="page"></param>
@@ -783,10 +791,10 @@ namespace SocialGoal.Web.Controllers
         public ActionResult GroupList(GroupFilter filter = GroupFilter.All, int page = 1)
         {
             // Get a paged list of groups
-            var groups = groupService.GetGroups(User.Identity.GetUserId(), filter, new Page(page,8));
-            
+            var groups = groupService.GetGroups(_userManager.GetUserId(User), filter, new Page(page,8));
+
             // map it to a paged list of models.
-            var groupsViewModel = Mapper.Map<IPagedList<Group>, IPagedList<GroupsItemViewModel>>(groups);
+            var groupsViewModel = _mapper.Map<IPagedList<Group>, IPagedList<GroupsItemViewModel>>(groups);
 
             foreach (var item in groupsViewModel)
             {
@@ -807,7 +815,7 @@ namespace SocialGoal.Web.Controllers
 
         public ActionResult SearchMemberForGoalAssigning(int id)
         {
-            var currentUserId = User.Identity.GetUserId();
+            var currentUserId = _userManager.GetUserId(User);
             var users = groupUserService.GetMembersOfGroup(id);
             var groupusers = groupUserService.GetGroupUsersListToAssign(id, currentUserId);
             var result = from u in users
@@ -828,10 +836,10 @@ namespace SocialGoal.Web.Controllers
         public ActionResult EditUpdate(int id)
         {
             var update = groupUpdateService.GetUpdate(id);
-            GroupUpdateFormModel editUpdate = Mapper.Map<GroupUpdate, GroupUpdateFormModel>(update);
+            GroupUpdateFormModel editUpdate = _mapper.Map<GroupUpdate, GroupUpdateFormModel>(update);
             if (update == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return PartialView("_EditUpdate", editUpdate);
         }
@@ -839,15 +847,15 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult EditUpdate(GroupUpdateFormModel newupdate)
         {
-            GroupUpdate update = Mapper.Map<GroupUpdateFormModel, GroupUpdate>(newupdate);
+            GroupUpdate update = _mapper.Map<GroupUpdateFormModel, GroupUpdate>(newupdate);
             if (ModelState.IsValid)
             {
 
                 groupUpdateService.EditUpdate(update);
-                var Updates = Mapper.Map<IEnumerable<GroupUpdate>, IEnumerable<GroupUpdateViewModel>>(groupUpdateService.GetUpdatesByGoal(newupdate.GroupGoalId));
+                var Updates = _mapper.Map<IEnumerable<GroupUpdate>, IEnumerable<GroupUpdateViewModel>>(groupUpdateService.GetUpdatesByGoal(newupdate.GroupGoalId));
                 foreach (var item in Updates)
                 {
-                    item.IsSupported = groupUpdateSupportService.IsUpdateSupported(item.GroupUpdateId, User.Identity.GetUserId(), groupUserService);
+                    item.IsSupported = groupUpdateSupportService.IsUpdateSupported(item.GroupUpdateId, _userManager.GetUserId(User), groupUserService);
                     item.UserId = groupUpdateUserService.GetGroupUpdateUser(item.GroupUpdateId).Id;
                 }
                 GroupUpdateListViewModel updates = new GroupUpdateListViewModel()
@@ -867,7 +875,7 @@ namespace SocialGoal.Web.Controllers
 
             if (update == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return PartialView("_DeleteUpdate", update);
         }
@@ -878,7 +886,7 @@ namespace SocialGoal.Web.Controllers
             var update = groupUpdateService.GetUpdate(id);
             if (update == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
 
             groupUpdateService.DeleteUpdate(id);
@@ -887,7 +895,7 @@ namespace SocialGoal.Web.Controllers
 
         public void SupportUpdate(int id)
         {
-            var groupuser = groupUserService.GetGroupUserByuserId(User.Identity.GetUserId());
+            var groupuser = groupUserService.GetGroupUserByuserId(_userManager.GetUserId(User));
             groupUpdateSupportService.CreateSupport(new GroupUpdateSupport() { GroupUserId = groupuser.GroupUserId, GroupUpdateId = id, UpdateSupportedDate = DateTime.Now });
         }
 
@@ -900,7 +908,7 @@ namespace SocialGoal.Web.Controllers
 
         public void UnSupportUpdate(int id)
         {
-            var groupuser = groupUserService.GetGroupUserByuserId(User.Identity.GetUserId());
+            var groupuser = groupUserService.GetGroupUserByuserId(_userManager.GetUserId(User));
             groupUpdateSupportService.DeleteSupport(id, groupuser.GroupUserId);
         }
 
@@ -908,7 +916,7 @@ namespace SocialGoal.Web.Controllers
         public JsonResult DisplayUpdateSupportCount(int id)
         {
             int supportcount = groupUpdateSupportService.GetSupportcount(id);
-            return Json(supportcount, JsonRequestBehavior.AllowGet);
+            return Json(supportcount);
         }
 
 

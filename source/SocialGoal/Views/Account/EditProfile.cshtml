@@ -1,4 +1,4 @@
-﻿@using Microsoft.AspNet.Identity
+@using Microsoft.AspNet.Identity
 @model SocialGoal.Web.ViewModels.UserProfileFormModel
 @{
     ViewBag.Title = "EditProfileView";
@@ -148,7 +148,7 @@
     }
 </div>
 <div class="span4">
-    @Html.Action("ImageUpload", "Account")
+    @await Component.InvokeAsync("ImageUpload")
 </div>
 <script type="text/javascript">
     $(document).ready(function () {

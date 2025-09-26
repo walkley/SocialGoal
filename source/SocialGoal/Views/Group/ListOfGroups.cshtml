@@ -1,22 +1,23 @@
-﻿@model GroupsPageViewModel
+@model GroupsPageViewModel
+@using Microsoft.AspNetCore.Mvc.Rendering
 @{
     ViewBag.Title = "ListOfGroups";
 }
 
 <div class="well span12">
-    
+
     <div class="span7" style="padding-left:30px;"><h4>Groups</h4></div>
 
     <div class="span5" style="padding-left:38px;">
-        <strong>Filter By</strong>         
-        @Html.EnumDropDownListFor(model => model.Filter, new { @onchange = "LoadGroups();" })
+        <strong>Filter By</strong>
+        @Html.DropDownListFor(model => model.Filter, Html.GetEnumSelectList(Model.Filter.GetType()), null, new { @class = "form-control", @onchange = "LoadGroups();" })
     </div>
-    
+
     @*This is the container that will be replaced by all ajax requests from either paging or changing the filter*@
     <div id="GroupPagingContainer" class="span11" style="margin-top: 10px;">
         @Html.Partial("_GroupsTable", Model)
     </div>
-    
+
 </div>
 
 <script type="text/javascript">

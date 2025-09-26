@@ -1,8 +1,8 @@
-﻿@using Microsoft.AspNet.Identity
+@using Microsoft.AspNet.Identity
 @model SocialGoal.Web.ViewModels.GoalViewModel
 @{
 	ViewBag.Title = Model.GoalName;
-	ViewContext.Controller.ViewBag.IncludeJqplot = true;
+	ViewBag.IncludeJqplot = true;
 	Layout = "~/Views/Shared/_GoalLayout.cshtml";
     string goalstatus = Model.GoalStatus.GoalStatusType;
 }
@@ -15,7 +15,7 @@
 <div class="well" style="height: 170px;">
     <div class="span5" style="float:left;">
         @if (User.Identity.GetUserId() != Model.UserId)
-        { 
+        {
             <div style="position: relative; margin-right: 20px">
                 <div id="support@(Model.GoalId)" style ="float:right">
                     @if (@Model.Supported == true)
@@ -23,14 +23,14 @@
                         <div style="float: right">
                             <input type="button"  class="btn btn-primary" value="Unfollow" id="UnSupportBtn" onclick ="UnSupportGoal(@Model.GoalId)"  />
                         </div>
-						 
+
 					}
 					else if (@Model.Supported == false)
 					{
 						<div style="float: right">
 							<input type="button"  class="btn btn-primary" value="Follow" id="SupportBtn" onclick ="SupportGoalNow(@Model.GoalId)"  />
 						</div>
-						  
+
                     }
                 </div>
             </div>
@@ -61,7 +61,7 @@
             </tr>
             <tr>
                 <td>
-                    <strong>End Date</strong> : @Html.DisplayFor(m => m.EndDate) 
+                    <strong>End Date</strong> : @Html.DisplayFor(m => m.EndDate)
                     @if (Model.EndDate < DateTime.Now)
                     {
                         <span class="label label-important">Date Exceeded</span>
@@ -72,12 +72,12 @@
                 <td>
                     <strong>Metric</strong> :
                     @if (Model.Metric == null)
-                    { 
+                    {
 
                         <text> No Metric</text>
                     }
                     else
-                    { 
+                    {
                         @Html.DisplayFor(m => m.Metric.Type)
                     }
                 </td>
@@ -90,7 +90,7 @@
                         <text>No Target</text>
                     }
                     else
-                    { 
+                    {
                         @Html.DisplayFor(m => m.Target)
                     }
                 </td>
@@ -102,8 +102,8 @@
 <!--Update section -->
 <div class="span6 well" style="margin-left: 0px;">
     @if (User.Identity.GetUserId() == Model.UserId )
-    {    
-            
+    {
+
         <table class="table" id="UpdatePostContent">
 
             <thead>
@@ -119,15 +119,15 @@
                 <div id="UpdateValidation"></div>
                 </td>
             </tr>
-           
+
             @if (Model.Metric != null)
-            {		
+            {
                 <tr>
                     <td class="span8">
                         <div class="input-append">
                             @if (Model.Metric != null)
-                            { 
-                                <input type="text" id="Status" onfocus="clearStatusError()" class="span8" placeholder="Add new satus of this update" /> 
+                            {
+                                <input type="text" id="Status" onfocus="clearStatusError()" class="span8" placeholder="Add new satus of this update" />
                             }
                             @if (Model.Metric != null && Model.Target != null)
                             { <span class="add-on">/@Model.Target @Model.Metric.Type</span>}
@@ -146,7 +146,7 @@
     }
     <div id="divupdate" style="margin: 0px;">
         <h5 style="margin-left:15px;">Latest Updates</h5>
-        @{ Html.RenderAction("DisplayUpdates", "Goal", Model.GoalId); }
+        @await Component.InvokeAsync("DisplayUpdates", new { id = Model.GoalId })
     </div>
     <div id="divInviteLayer" class="jqmWindow">
         <div id="handle" style="float: right">
@@ -161,14 +161,14 @@
 <div class="span6">
     <!--Graph  section -->
     <div id="graph">
-        @Html.Action("ReportPage", new { id = Model.GoalId })
+        @await Component.InvokeAsync("ReportPage", new { id = Model.GoalId })
         @Html.Hidden("goalId", Model.GoalId)
     </div>
     <!--Graph  section end here-->
     <!--update status section and invite user section -->
     <div class="span12" style="float: right;">
         <!--invite user section -->
-        @Html.Action("InviteUser", "Goal", new { id = Model.GoalId })
+        @await Component.InvokeAsync("InviteUser", new { id = Model.GoalId })
         <!--invite section ends -->
         <!--update status section -->
         <div class="well span6" style="min-height: 202px;">
@@ -181,11 +181,11 @@
                     <input type="button" id="drpdwnBtn" class="btn btn-primary" value="Change" onclick="DropDownChange();"
                         disabled="disabled" style="height: 28px; margin-bottom: 10px;" />
                 </div>
-                    
+
             }
             else
             {
-                @Html.DisplayFor(m => m.GoalStatus.GoalStatusType)                               
+                @Html.DisplayFor(m => m.GoalStatus.GoalStatusType)
             }
         </div>
         <!--update status section ends -->
@@ -196,14 +196,14 @@
 <script type="text/javascript">
     $(document).ready(function(){
     var goalstatus="@goalstatus";
-    
+
     if(goalstatus=="Completed")
     {
         $("#UpdatePostContent").hide();
         $(".EditDeleteUpdate").hide();
     }
-    
-    
+
+
     });
 
 	$(function () {
@@ -246,7 +246,7 @@
 		}
 
 	}
-    
+
     $(window).resize(function () {
         var url = '/Goal/ReportPage';
         $.get(url, { 'id': @Model.GoalId }, function (data) {
@@ -277,15 +277,15 @@
     $('#Update').focusout(function(){
         if ($('#Update').val() == '') {
 			 $('#UpdateValidation').html('<label class="field-validation-error">Please Enter Update</label>');
-		}        
-		else 
+		}
+		else
         {
             $('#UpdateValidation').html('');
         }
-    
+
     });
-    
- 
+
+
 
 	function saveUpdate(target, metric) {
 
@@ -299,16 +299,16 @@
 
 		if ($('#Update').val() == '') {
 			 $('#UpdateValidation').html('<label class="field-validation-error">Please Enter Update</label>');
-           
+
 			//$("#postupdate").removeAttr("disabled");
-		}        
-		else 
+		}
+		else
         {
             $('#UpdateValidation').html('');
 			var PostData = { 'GoalId': Gid, 'Updatemsg': CurrUpdte, 'status': CurrStatus };
 			var url = '/Goal/SaveUpdate';
             var numericCheck=DecimalValidate(CurrStatus);
-           
+
             if( (CurrStatus=='') || (CurrStatus!='' && numericCheck))
             {
 			    $.post(url, PostData, function (response) {

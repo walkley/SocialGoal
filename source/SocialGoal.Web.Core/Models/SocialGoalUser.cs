@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Security.Principal;
-using System.Web.Security;
+using Microsoft.AspNetCore.Authentication;
+using System.Security.Claims;
 
 
 namespace SocialGoal.Web.Core.Models
-{ 
+{
     [Serializable]
     public class SocialGoalUser : IIdentity
     {
@@ -29,10 +30,14 @@ namespace SocialGoal.Web.Core.Models
             this.UserId = userInfo.UserId;
         }
 
-        public SocialGoalUser(FormsAuthenticationTicket ticket)
-            : this(ticket.Name, UserInfo.FromString(ticket.UserData))
+        public SocialGoalUser(ClaimsPrincipal principal, string userData)
         {
-            if (ticket == null) throw new ArgumentNullException("ticket");
+            if (principal == null) throw new ArgumentNullException("principal");
+            this.Name = principal.Identity?.Name ?? string.Empty;
+            var userInfo = UserInfo.FromString(userData);
+            this.DisplayName = userInfo.DisplayName;
+            this.UserId = userInfo.UserId;
+            this.RoleName = userInfo.RoleName;
         }
 
         public string Name { get; private set; }

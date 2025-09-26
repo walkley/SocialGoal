@@ -1,4 +1,4 @@
-﻿@using Microsoft.AspNet.Identity
+@using Microsoft.AspNet.Identity
 @model SocialGoal.Web.ViewModels.UserProfileViewModel
 @{
     ViewBag.Title = "UserProfileView";
@@ -247,17 +247,17 @@
                     </table>
                 </div>
             }
-@*   @Html.Action("UserDetail", "Account", new { id = Model.UserId })*@
+@*   @await Component.InvokeAsync("UserDetail", new { id = Model.UserId })*@
         
     </div >
     <div class="well span6" style="float:right;">
         <span style="float:left;margin-left:15px;margin-bottom:10px;"><strong>Recent Activities </strong></span>    
        
-        @if (Model.Following == true || Model.UserId == User.Identity.GetUserId())
-        { 
+            @if (Model.Following == true || Model.UserId == User.Identity.GetUserId())
+        {
             <div id="divusernotification" class="span12" style="height: 550px; overflow-y: hidden; outline: none;" tabindex="5002">
-            
-                @Html.Action("UserNotification", "Home", new { id = Model.UserId })
+
+                @await Component.InvokeAsync("UserNotification", new { id = Model.UserId })
             </div>
         }
      

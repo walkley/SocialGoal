@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,13 +8,17 @@ namespace SocialGoal.Mappings
 {
     public class AutoMapperConfiguration
     {
+        public static IMapper Mapper { get; private set; }
+
         public static void Configure()
         {
-            Mapper.Initialize(x =>
+            var configuration = new MapperConfiguration(cfg =>
             {
-                x.AddProfile<DomainToViewModelMappingProfile>();
-                x.AddProfile<ViewModelToDomainMappingProfile>();
+                cfg.AddProfile<DomainToViewModelMappingProfile>();
+                cfg.AddProfile<ViewModelToDomainMappingProfile>();
             });
+
+            Mapper = configuration.CreateMapper();
         }
     }
 }

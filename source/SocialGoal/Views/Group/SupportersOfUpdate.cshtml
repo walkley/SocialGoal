@@ -1,28 +1,28 @@
-﻿@model SocialGoal.Web.ViewModels.GroupUpdateSupportersViewModel
+@model SocialGoal.Web.ViewModels.GroupUpdateSupportersViewModel
 <div>
     @if (Model.Users.Count() == 0)
     {
         <p class="span5 alert alert-info supporters-message">
-            No Supporters</p>  
+            No Supporters</p>
     }
     @foreach (var item in Model.Users)
     {
         <div>
             <div style="position: relative">
                 <div>
-                    <a href="@Url.Action("UserProfile", "Account", new { id = item.UserId }, null)" >
-                        @Html.User().Avatar(item.ProfilePicUrl, new { @class = "span2" })
+                    <a href="@Url.Action("UserProfile", "Account", new { id = item.Id }, null)" >
+                        <img src="@item.ProfilePicUrl" class="span2" alt="Profile Picture" />
                     </a>
                 </div>
             </div>
             <div>
-                @Html.ActionLink(@item.UserName, "UserProfile", "Account", new { id = item.UserId }, null)
+                @Html.ActionLink(@item.UserName, "UserProfile", "Account", new { id = item.Id }, null)
             </div>
             <div>@item.Email
             </div>
         </div>
         <br />
         <hr>
-              
+
     }
 </div>

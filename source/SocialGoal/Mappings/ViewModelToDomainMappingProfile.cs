@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using SocialGoal.Model.Models;
 using SocialGoal.Web.ViewModels;
 using System;
@@ -11,27 +11,22 @@ namespace SocialGoal.Mappings
 
     public class ViewModelToDomainMappingProfile : Profile
     {
-        public override string ProfileName
+        public ViewModelToDomainMappingProfile()
         {
-            get { return "ViewModelToDomainMappings"; }
-        }
-
-        protected override void Configure()
-        {
-            Mapper.CreateMap<CommentFormModel, Comment>();
-            Mapper.CreateMap<GroupFormModel, Group>();
-            Mapper.CreateMap<FocusFormModel, Focus>();
-            Mapper.CreateMap<UpdateFormModel, Update>();
-            Mapper.CreateMap<UserFormModel, ApplicationUser>();
-            Mapper.CreateMap<UserProfileFormModel, UserProfile>();
-            Mapper.CreateMap<GroupGoalFormModel, GroupGoal>();
-            Mapper.CreateMap<GroupUpdateFormModel, GroupUpdate>();
-            Mapper.CreateMap<GroupCommentFormModel, GroupComment>();
-            Mapper.CreateMap<GroupRequestFormModel, GroupRequest>();
-            Mapper.CreateMap<FollowRequestFormModel, FollowRequest>();
-            Mapper.CreateMap<GoalFormModel, Goal>();
-            //Mapper.CreateMap<XViewModel, X()
-            //    .ForMember(x => x.PropertyXYZ, opt => opt.MapFrom(source => source.Property1));     
+            CreateMap<CommentFormModel, Comment>();
+            CreateMap<GroupFormModel, Group>();
+            CreateMap<FocusFormModel, Focus>();
+            CreateMap<UpdateFormModel, Update>();
+            CreateMap<UserFormModel, ApplicationUser>();
+            CreateMap<UserProfileFormModel, UserProfile>();
+            CreateMap<GroupGoalFormModel, GroupGoal>();
+            CreateMap<GroupUpdateFormModel, GroupUpdate>();
+            CreateMap<GroupCommentFormModel, GroupComment>();
+            CreateMap<GroupRequestFormModel, GroupRequest>();
+            CreateMap<FollowRequestFormModel, FollowRequest>();
+            CreateMap<GoalFormModel, Goal>();
+            //CreateMap<XViewModel, X>()
+            //    .ForMember(x => x.PropertyXYZ, opt => opt.MapFrom(source => source.Property1));
         }
     }
 }

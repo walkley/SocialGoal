@@ -1,5 +1,4 @@
-﻿using System;
-using System.Web.Mvc;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -16,11 +15,18 @@ using AutoMapper;
 using Moq;
 using System.Linq.Expressions;
 using System.Security.Principal;
-using System.Web;
 using SocialGoal.Web.Core.Authentication;
-using System.Web.Security;
 using SocialGoal.Web.Core.Models;
 using SocialGoal.Tests.Helpers;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using NUnit.Framework.Legacy;
+using Microsoft.AspNetCore.Identity;
+using AutoMapper;
+
 
 
 namespace SocialGoal.Tests.Controllers
@@ -44,13 +50,15 @@ namespace SocialGoal.Tests.Controllers
         ISupportInvitationService supportInvitationService;
         IFollowRequestService followRequestService;
         IUserService userService;
+        Mock<UserManager<ApplicationUser>> userManager;
+        IMapper mapper;
 
         Mock<ControllerContext> controllerContext;
         Mock<IIdentity> identity;
-        Mock<IPrincipal> principal;
-        Mock<HttpContextBase> contextBase;
-        Mock<HttpRequestBase> httpRequest;
-        Mock<HttpResponseBase> httpResponse;
+        Mock<ClaimsPrincipal> principal;
+        Mock<HttpContext> contextBase;
+        Mock<HttpRequest> httpRequest;
+        Mock<HttpResponse> httpResponse;
         Mock<GenericPrincipal> genericPrincipal;
 
         [SetUp]
@@ -62,15 +70,28 @@ namespace SocialGoal.Tests.Controllers
             userRepository = new Mock<IUserRepository>();
             userProfileRepository = new Mock<IUserProfileRepository>();
 
+            // Setup UserManager mock
+            var store = new Mock<IUserStore<ApplicationUser>>();
+            userManager = new Mock<UserManager<ApplicationUser>>(store.Object, null, null, null, null, null, null, null, null);
+
+            // Setup AutoMapper
+            var config = new MapperConfiguration(cfg =>
+            {
+                cfg.CreateMap<GroupInvitation, NotificationViewModel>();
+                cfg.CreateMap<SupportInvitation, NotificationViewModel>();
+                cfg.CreateMap<FollowRequest, NotificationViewModel>();
+            });
+            mapper = config.CreateMapper();
+
 
             unitOfWork = new Mock<IUnitOfWork>();
 
             controllerContext = new Mock<ControllerContext>();
-            contextBase = new Mock<HttpContextBase>();
-            principal = new Mock<IPrincipal>();
+            contextBase = new Mock<HttpContext>();
+            principal = new Mock<ClaimsPrincipal>();
             identity = new Mock<IIdentity>();
-            httpRequest = new Mock<HttpRequestBase>();
-            httpResponse = new Mock<HttpResponseBase>();
+            httpRequest = new Mock<HttpRequest>();
+            httpResponse = new Mock<HttpResponse>();
             genericPrincipal = new Mock<GenericPrincipal>();
 
             groupInvitationService = new GroupInvitationService(groupInvitationRepository.Object, unitOfWork.Object);
@@ -95,40 +116,57 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Replace FormsAuthentication with equivalent .NET Core authentication
+            TimeSpan authTimeout = TimeSpan.FromMinutes(30);
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            };
+            var userIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            var userPrincipal = new ClaimsPrincipal(userIdentity);
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            NotificationController controller = new NotificationController(goalService, updateService, commentService, groupInvitationService, supportInvitationService, followRequestService, userService);
+            NotificationController controller = new NotificationController(goalService, updateService, commentService, groupInvitationService, supportInvitationService, followRequestService, userService, userManager.Object, mapper);
 
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
+            principal.SetupGet(x => x.Identity.IsAuthenticated).Returns(true);
             controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            var responseCookiesMock = new Mock<IResponseCookies>();
+            httpResponse.SetupGet(a => a.Cookies).Returns(responseCookiesMock.Object);
 
             var formsAuthentication = new DefaultFormsAuthentication();
 
 
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // In ASP.NET Core, we manage cookies differently
+            var cookieOptions = new CookieOptions
+            {
+                Expires = DateTime.Now.AddMinutes(30),
+                Path = "/"
+            };
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
+            // Simulate authentication cookie
+            contextBase.Object.Response.Cookies.Append(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                "authentication-cookie-value",
+                cookieOptions);
 
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            // In ASP.NET Core tests, we work with the claims principal directly
+            // Create a mock of SocialGoalUser instead of instantiating it directly
+            var goalsetterUser = new Mock<SocialGoalUser>().Object;
+            // Setup properties through reflection since they have private setters
+            typeof(SocialGoalUser).GetProperty("RoleName").SetValue(goalsetterUser, userContext.RoleName);
+            typeof(SocialGoalUser).GetProperty("UserId").SetValue(goalsetterUser, userContext.UserId);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -136,8 +174,8 @@ namespace SocialGoal.Tests.Controllers
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed", FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",},
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             groupInvitationRepository.Setup(x => x.GetAll()).Returns(groupInvitation);
@@ -146,8 +184,8 @@ namespace SocialGoal.Tests.Controllers
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             supportInvitationRepository.Setup(x => x.GetAll()).Returns(supportInvitation);
@@ -156,16 +194,16 @@ namespace SocialGoal.Tests.Controllers
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             followRequestRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<FollowRequest, bool>>>())).Returns(followInvitation);
-            Mapper.CreateMap<GroupInvitation, NotificationViewModel>();
-            Mapper.CreateMap<SupportInvitation, NotificationViewModel>();
-            Mapper.CreateMap<FollowRequest, NotificationViewModel>();
+
+            // MapperConfiguration already set up in SetUp method
+
             ViewResult result = controller.Index(1) as ViewResult;
-            Assert.IsNotNull(result);
+            ClassicAssert.IsNotNull(result);
         }
 
         [Test]
@@ -180,23 +218,26 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Replace FormsAuthentication with equivalent .NET Core authentication
+            TimeSpan authTimeout = TimeSpan.FromMinutes(30);
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            };
+            var userIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            var userPrincipal = new ClaimsPrincipal(userIdentity);
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            NotificationController controller = new NotificationController(goalService, updateService, commentService, groupInvitationService, supportInvitationService, followRequestService, userService);
+            NotificationController controller = new NotificationController(goalService, updateService, commentService, groupInvitationService, supportInvitationService, followRequestService, userService, userManager.Object, mapper);
 
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
+            principal.SetupGet(x => x.Identity.IsAuthenticated).Returns(true);
             controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
-            controllerContext.SetupGet(s => s.HttpContext.Request["X-Requested-With"]).Returns("XMLHttpRequest");
+            controllerContext.SetupGet(s => s.HttpContext.Request.Headers["X-Requested-With"]).Returns("XMLHttpRequest");
             controller.ControllerContext = controllerContext.Object;
 
 
@@ -204,18 +245,32 @@ namespace SocialGoal.Tests.Controllers
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            var responseCookiesMock = new Mock<IResponseCookies>();
+            httpResponse.SetupGet(a => a.Cookies).Returns(responseCookiesMock.Object);
 
             var formsAuthentication = new DefaultFormsAuthentication();
 
 
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // In ASP.NET Core, we manage cookies differently
+            var cookieOptions = new CookieOptions
+            {
+                Expires = DateTime.Now.AddMinutes(30),
+                Path = "/"
+            };
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
+            // Simulate authentication cookie
+            contextBase.Object.Response.Cookies.Append(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                "authentication-cookie-value",
+                cookieOptions);
 
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            // In ASP.NET Core tests, we work with the claims principal directly
+            // Create a mock of SocialGoalUser instead of instantiating it directly
+            var goalsetterUser = new Mock<SocialGoalUser>().Object;
+            // Setup properties through reflection since they have private setters
+            typeof(SocialGoalUser).GetProperty("RoleName").SetValue(goalsetterUser, userContext.RoleName);
+            typeof(SocialGoalUser).GetProperty("UserId").SetValue(goalsetterUser, userContext.UserId);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -223,8 +278,8 @@ namespace SocialGoal.Tests.Controllers
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed", FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",},
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             groupInvitationRepository.Setup(x => x.GetAll()).Returns(groupInvitation);
@@ -233,8 +288,8 @@ namespace SocialGoal.Tests.Controllers
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             supportInvitationRepository.Setup(x => x.GetAll()).Returns(supportInvitation);
@@ -243,17 +298,17 @@ namespace SocialGoal.Tests.Controllers
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             followRequestRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<FollowRequest, bool>>>())).Returns(followInvitation);
-            Mapper.CreateMap<GroupInvitation, NotificationViewModel>();
-            Mapper.CreateMap<SupportInvitation, NotificationViewModel>();
-            Mapper.CreateMap<FollowRequest, NotificationViewModel>();
+
+            // MapperConfiguration already set up in SetUp method
+
             PartialViewResult result = controller.Index(1) as PartialViewResult;
-            Assert.IsNotNull(result);
-            Assert.AreEqual("_NotificationList", result.ViewName);
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.AreEqual("_NotificationList", result.ViewName);
         }
 
         [Test]
@@ -268,40 +323,57 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Replace FormsAuthentication with equivalent .NET Core authentication
+            TimeSpan authTimeout = TimeSpan.FromMinutes(30);
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            };
+            var userIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            var userPrincipal = new ClaimsPrincipal(userIdentity);
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            NotificationController controller = new NotificationController(goalService, updateService, commentService, groupInvitationService, supportInvitationService, followRequestService, userService);
+            NotificationController controller = new NotificationController(goalService, updateService, commentService, groupInvitationService, supportInvitationService, followRequestService, userService, userManager.Object, mapper);
 
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
+            principal.SetupGet(x => x.Identity.IsAuthenticated).Returns(true);
             controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            var responseCookiesMock = new Mock<IResponseCookies>();
+            httpResponse.SetupGet(a => a.Cookies).Returns(responseCookiesMock.Object);
 
             var formsAuthentication = new DefaultFormsAuthentication();
 
 
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // In ASP.NET Core, we manage cookies differently
+            var cookieOptions = new CookieOptions
+            {
+                Expires = DateTime.Now.AddMinutes(30),
+                Path = "/"
+            };
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
+            // Simulate authentication cookie
+            contextBase.Object.Response.Cookies.Append(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                "authentication-cookie-value",
+                cookieOptions);
 
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            // In ASP.NET Core tests, we work with the claims principal directly
+            // Create a mock of SocialGoalUser instead of instantiating it directly
+            var goalsetterUser = new Mock<SocialGoalUser>().Object;
+            // Setup properties through reflection since they have private setters
+            typeof(SocialGoalUser).GetProperty("RoleName").SetValue(goalsetterUser, userContext.RoleName);
+            typeof(SocialGoalUser).GetProperty("UserId").SetValue(goalsetterUser, userContext.UserId);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -309,8 +381,8 @@ namespace SocialGoal.Tests.Controllers
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed", FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",},
             new GroupInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             groupInvitationRepository.Setup(x => x.GetAll()).Returns(groupInvitation);
@@ -319,8 +391,8 @@ namespace SocialGoal.Tests.Controllers
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new SupportInvitation{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             supportInvitationRepository.Setup(x => x.GetAll()).Returns(supportInvitation);
@@ -329,16 +401,16 @@ namespace SocialGoal.Tests.Controllers
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ed",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId ="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new FollowRequest{ Accepted=false,ToUserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",FromUserId = "402bd590-fdc7-49ad-9728-40efbfe512ee"},
-           
-           
+
+
           }.AsEnumerable();
 
             followRequestRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<FollowRequest, bool>>>())).Returns(followInvitation);
-            Mapper.CreateMap<GroupInvitation, NotificationViewModel>();
-            Mapper.CreateMap<SupportInvitation, NotificationViewModel>();
-            Mapper.CreateMap<FollowRequest, NotificationViewModel>();
+
+            // MapperConfiguration already set up in SetUp method
+
             IEnumerable<NotificationViewModel> result = controller.GetNotifications(5, 5) as IEnumerable<NotificationViewModel>;
-            Assert.IsNotNull(result);
+            ClassicAssert.IsNotNull(result);
         }
 
         public ApplicationUser getApplicationUser()

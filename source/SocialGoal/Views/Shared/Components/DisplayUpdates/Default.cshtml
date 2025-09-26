@@ -1,0 +1,72 @@
+
+@using System.Security.Claims
+@model SocialGoal.Web.ViewModels.GroupUpdateListViewModel
+
+@if (Model.GroupUpdates.Count() > 0)
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>
+                    <h5>Updates</h5>
+                </th>
+            </tr>
+        </thead>
+        @foreach (var item in Model.GroupUpdates)
+        {
+            <tr>
+                <td>
+                    <div class="updateitem">
+                        <div class="row">
+                            <div class="span10">
+                                <span class="updatetext">@item.Updatemsg</span>
+                                <div class="updatesupport">
+                                    @if (item.status != null)
+                                    {
+                                        <span>Status: @item.status</span>
+                                        if (Model.Target != null)
+                                        {
+                                            <span>/@Model.Target</span>
+                                        }
+                                        if (Model.Metric != null)
+                                        {
+                                            <span>@Model.Metric.Type</span>
+                                        }
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <div class="updateinfo">
+                            <div class="row">
+                                <div class="span4">
+                                    <small>
+                                        @item.UpdateDate.ToString("dd MMM yyyy - hh:mm tt")
+                                    </small>
+                                </div>
+                                <div class="span4">
+                                    <div class="EditDeleteUpdate">
+                                        @if (User.FindFirstValue(ClaimTypes.NameIdentifier) == item.UserId)
+                                        {
+                                            <a href="#" onclick="EditUpdatePopup(@item.GroupUpdateId);">
+                                                <span rel="tooltip" title="Edit Update"><i class="icon-edit"></i></span>
+                                            </a>
+                                            <a href="#" onclick="DeleteUpdatePopup(@item.GroupUpdateId);">
+                                                <span rel="tooltip" title="Delete Update"><i class="icon-trash"></i></span>
+                                            </a>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        }
+    </table>
+}
+else
+{
+    <div class="alert alert-info">
+        No updates yet
+    </div>
+}

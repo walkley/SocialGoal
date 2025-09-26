@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using SocialGoal.Model.Models;
 using SocialGoal.Service;
 using SocialGoal.Web.Core.Models;
@@ -7,11 +7,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
-using System.Web.Mvc;
 using SocialGoal.Web.Core.Extensions;
 using SocialGoal.Web.Mailers;
 using SocialGoal.Properties;
-using Microsoft.AspNet.Identity;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Identity;
+
+using Microsoft.AspNetCore.Authorization;
+
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+
 
 namespace SocialGoal.Web.Controllers
 {
@@ -30,6 +36,7 @@ namespace SocialGoal.Web.Controllers
         private readonly IGoalStatusService goalStatusService;
         private readonly ICommentUserService commentUserService;
         private readonly IUpdateSupportService updateSupportService;
+        private readonly IMapper mapper;
 
         private IUserMailer userMailer = new UserMailer();
         public IUserMailer UserMailer
@@ -38,7 +45,7 @@ namespace SocialGoal.Web.Controllers
             set { userMailer = value; }
         }
 
-        public GoalController(IGoalService goalService, IMetricService metricService, IFocusService focusService, ISupportService supportService, IUpdateService updateService, ICommentService commentService, IUserService userService, ISecurityTokenService securityTokenService, ISupportInvitationService supportInvitationService, IGoalStatusService goalStatusService, ICommentUserService commentUserService, IUpdateSupportService updateSupportService)
+        public GoalController(IGoalService goalService, IMetricService metricService, IFocusService focusService, ISupportService supportService, IUpdateService updateService, ICommentService commentService, IUserService userService, ISecurityTokenService securityTokenService, ISupportInvitationService supportInvitationService, IGoalStatusService goalStatusService, ICommentUserService commentUserService, IUpdateSupportService updateSupportService, IMapper mapper = null)
         {
             this.goalService = goalService;
             this.supportInvitationService = supportInvitationService;
@@ -52,6 +59,7 @@ namespace SocialGoal.Web.Controllers
             this.goalStatusService = goalStatusService;
             this.commentUserService = commentUserService;
             this.updateSupportService = updateSupportService;
+            this.mapper = mapper;
         }
 
         public ActionResult Index(int id)
@@ -59,10 +67,11 @@ namespace SocialGoal.Web.Controllers
             var goal = goalService.GetGoal(id);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
-            var goalDetails = Mapper.Map<Goal, GoalViewModel>(goal);
-            goalDetails.Supported = supportService.IsGoalSupported(id, User.Identity.GetUserId());
+            var goalDetails = mapper.Map<Goal, GoalViewModel>(goal);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            goalDetails.Supported = supportService.IsGoalSupported(id, userId);
             var goalstatus = goalStatusService.GetGoalStatus();
             goalDetails.GoalStatuses = goalstatus.ToSelectListItems(goal.GoalStatusId);
             return View(goalDetails);
@@ -70,15 +79,15 @@ namespace SocialGoal.Web.Controllers
 
         public ViewResult MyGoal()
         {
-            string userid = User.Identity.GetUserId();
+            string userid = User.FindFirstValue(ClaimTypes.NameIdentifier);
             var Goals = goalService.GetMyGoals(userid);
-            var goalDetails = Mapper.Map<IEnumerable<Goal>, IEnumerable<GoalViewModel>>(Goals);
+            var goalDetails = mapper.Map<IEnumerable<Goal>, IEnumerable<GoalViewModel>>(Goals);
             return View(goalDetails);
         }
 
         public ViewResult FollowedGoal()
         {
-            var followed = supportService.GetUserSupportedGoals(User.Identity.GetUserId(), goalService);
+            var followed = supportService.GetUserSupportedGoals(User.FindFirstValue(ClaimTypes.NameIdentifier), goalService);
             return View(followed);
         }
 
@@ -94,7 +103,7 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult Create(GoalFormModel createGoal)
         {
-            Goal goal = Mapper.Map<GoalFormModel, Goal>(createGoal);
+            Goal goal = mapper.Map<GoalFormModel, Goal>(createGoal);
             var errors = goalService.CanAddGoal(goal, updateService).ToList();
             ModelState.AddModelErrors(errors);
             if (ModelState.IsValid)
@@ -111,10 +120,10 @@ namespace SocialGoal.Web.Controllers
         public ActionResult Edit(int id)
         {
             var goal = goalService.GetGoal(id);
-            GoalFormModel editGoal = Mapper.Map<Goal, GoalFormModel>(goal);
+            GoalFormModel editGoal = mapper.Map<Goal, GoalFormModel>(goal);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             var metrics = metricService.GetMetrics();
             if (goal.Metric != null)
@@ -127,7 +136,7 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult Edit(GoalFormModel editGoal)
         {
-            Goal goalToEdit = Mapper.Map<GoalFormModel, Goal>(editGoal);
+            Goal goalToEdit = mapper.Map<GoalFormModel, Goal>(editGoal);
             var errors = goalService.CanAddGoal(goalToEdit, updateService);
             ModelState.AddModelErrors(errors);
             if (ModelState.IsValid)
@@ -164,7 +173,7 @@ namespace SocialGoal.Web.Controllers
             var goal = goalService.GetGoal(id);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return View(goal);
         }
@@ -175,7 +184,7 @@ namespace SocialGoal.Web.Controllers
             var goal = goalService.GetGoal(id);
             if (goal == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
 
             goalService.DeleteGoal(id);
@@ -184,23 +193,23 @@ namespace SocialGoal.Web.Controllers
 
         public PartialViewResult MyGoals()
         {
-            string userid = User.Identity.GetUserId();
+            string userid = User.FindFirstValue(ClaimTypes.NameIdentifier);
             var Goals = goalService.GetMyGoals(userid);
             return PartialView("_MyGoalsView", Goals);
         }
 
         public PartialViewResult GoalsFollowing()
         {
-            var followed = supportService.GetUserSupportedGoals(User.Identity.GetUserId(), goalService);
+            var followed = supportService.GetUserSupportedGoals(User.FindFirstValue(ClaimTypes.NameIdentifier), goalService);
             return PartialView("_FollowedGoals", followed);
         }
 
         public PartialViewResult DisplayUpdates(int id)
         {
-            var Updates = Mapper.Map<IEnumerable<Update>, IEnumerable<UpdateViewModel>>(updateService.GetUpdatesByGoal(id));
+            var Updates = mapper.Map<IEnumerable<Update>, IEnumerable<UpdateViewModel>>(updateService.GetUpdatesByGoal(id));
             foreach (var item in Updates)
             {
-                item.IsSupported = updateSupportService.IsUpdateSupported(item.UpdateId, User.Identity.GetUserId());
+                item.IsSupported = updateSupportService.IsUpdateSupported(item.UpdateId, User.FindFirstValue(ClaimTypes.NameIdentifier));
             }
             UpdateListViewModel updates = new UpdateListViewModel()
             {
@@ -226,16 +235,16 @@ namespace SocialGoal.Web.Controllers
             // Update update = Mapper.Map<UpdateFormModel, Update>(newupdate);
             if (ModelState.IsValid)
             {
-                Update update = Mapper.Map<UpdateFormModel, Update>(newupdate);
+                Update update = mapper.Map<UpdateFormModel, Update>(newupdate);
                 update.Goal = goalService.GetGoal(newupdate.GoalId);
                 var updateVal = updateService.GetHighestUpdateValue(newupdate.GoalId);
-               
+
                 if(updateVal!=null)
-                {  
+                {
                     if (updateVal.status <= newupdate.status)
                     {
                         updateService.CreateUpdate(update);
-                       
+
                     }
                     else
                     {
@@ -249,10 +258,10 @@ namespace SocialGoal.Web.Controllers
                 }
 
 
-                     var Updates = Mapper.Map<IEnumerable<Update>, IEnumerable<UpdateViewModel>>(updateService.GetUpdatesByGoal(newupdate.GoalId));
+                var Updates = mapper.Map<IEnumerable<Update>, IEnumerable<UpdateViewModel>>(updateService.GetUpdatesByGoal(newupdate.GoalId));
                      foreach (var item in Updates)
                      {
-                         item.IsSupported = updateSupportService.IsUpdateSupported(item.UpdateId, User.Identity.GetUserId());
+                         item.IsSupported = updateSupportService.IsUpdateSupported(item.UpdateId, User.FindFirstValue(ClaimTypes.NameIdentifier));
                      }
                      UpdateListViewModel updates = new UpdateListViewModel()
                      {
@@ -278,7 +287,7 @@ namespace SocialGoal.Web.Controllers
             SupportInvitation newInvitation = new SupportInvitation()
             {
                 GoalId = id,
-                FromUserId = User.Identity.GetUserId(),
+                FromUserId = User.FindFirstValue(ClaimTypes.NameIdentifier),
                 ToUserId = userId,
                 SentDate = DateTime.Now
             };
@@ -290,7 +299,7 @@ namespace SocialGoal.Web.Controllers
         public PartialViewResult DisplayComments(int updateId)
         {
             var comments = commentService.GetCommentsByUpdate(updateId);
-            IEnumerable<CommentsViewModel> commentsView = Mapper.Map<IEnumerable<Comment>, IEnumerable<CommentsViewModel>>(comments);
+            IEnumerable<CommentsViewModel> commentsView = mapper.Map<IEnumerable<Comment>, IEnumerable<CommentsViewModel>>(comments);
             foreach (var item in commentsView)
             {
                 var user = commentUserService.GetUser(item.CommentId);
@@ -305,8 +314,8 @@ namespace SocialGoal.Web.Controllers
         {
             if (ModelState.IsValid)
             {
-                var userId = User.Identity.GetUserId();
-                var comment = Mapper.Map<CommentFormModel, Comment>(newcomment);
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                var comment = mapper.Map<CommentFormModel, Comment>(newcomment);
                 commentService.CreateComment(comment, userId);
             }
             return RedirectToAction("DisplayComments", new { updateId = newcomment.UpdateId });
@@ -316,13 +325,13 @@ namespace SocialGoal.Web.Controllers
         public JsonResult DisplayCommentCount(int UpdId)
         {
             int commentcount = commentService.GetCommentsByUpdate(UpdId).Count();
-            return Json(commentcount, JsonRequestBehavior.AllowGet);
+            return Json(commentcount);
         }
 
         public JsonResult SearchUser(string username, int goalId)
         {
-            return Json(from g in supportService.SearchUserToSupport(username, goalId, userService, supportInvitationService,User.Identity.GetUserId())
-                        select new { label = g.UserName + ", " + g.Email, value = g.UserName, id = g.Id }, JsonRequestBehavior.AllowGet);
+            return Json(from g in supportService.SearchUserToSupport(username, goalId, userService, supportInvitationService, User.FindFirstValue(ClaimTypes.NameIdentifier))
+                        select new { label = g.UserName + ", " + g.Email, value = g.UserName, id = g.Id });
         }
 
         public int NoOfComments(int id)
@@ -332,25 +341,26 @@ namespace SocialGoal.Web.Controllers
 
         public IEnumerable<Goal> SearchGoal(string name)
         {
-            var goals = Mapper.Map<IEnumerable<Goal>, IEnumerable<GoalViewModel>>(goalService.SearchGoal(name)).ToList();
-            goals.ForEach(g => g.Supported = g.UserId != User.Identity.GetUserId() ? (bool?)supportService.IsGoalSupported(g.GoalId, User.Identity.GetUserId()) : null);
+            var goals = mapper.Map<IEnumerable<Goal>, IEnumerable<GoalViewModel>>(goalService.SearchGoal(name)).ToList();
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            goals.ForEach(g => g.Supported = g.UserId != currentUserId ? (bool?)supportService.IsGoalSupported(g.GoalId, currentUserId) : null);
             return (IEnumerable<Goal>)goals;
         }
 
         public void SupportGoal(int id)
         {
-            supportService.CreateSupport(new Support() { UserId = User.Identity.GetUserId(), GoalId = id, SupportedDate = DateTime.Now });
+            supportService.CreateSupport(new Support() { UserId = User.FindFirstValue(ClaimTypes.NameIdentifier), GoalId = id, SupportedDate = DateTime.Now });
         }
 
         public ActionResult SupportGoalNow(int id)
         {
-            supportService.CreateUserSupport(new Support() { UserId = User.Identity.GetUserId(), GoalId = id, SupportedDate = DateTime.Now }, supportInvitationService);
+            supportService.CreateUserSupport(new Support() { UserId = User.FindFirstValue(ClaimTypes.NameIdentifier), GoalId = id, SupportedDate = DateTime.Now }, supportInvitationService);
             return RedirectToAction("Index", new { id = id });
         }
 
         public void UnSupportGoal(int id)
         {
-            supportService.DeleteSupport(id, User.Identity.GetUserId());
+            supportService.DeleteSupport(id, User.FindFirstValue(ClaimTypes.NameIdentifier));
         }
 
         public PartialViewResult SupportInvitation(int goalId)
@@ -403,7 +413,7 @@ namespace SocialGoal.Web.Controllers
                 Data = (from g in updateService.GetUpdatesWithStatus(id).OrderBy(u => u.UpdateDate)
                         select new { Date = g.UpdateDate.ToString(), Value = g.status }),
                 Target = new { EndDate = goal.EndDate.ToString(), Target = (goal.Target != null) ? goal.Target : 100 }
-            }, JsonRequestBehavior.AllowGet);
+            });
         }
 
         public double GoalProgress(int id)
@@ -473,20 +483,20 @@ namespace SocialGoal.Web.Controllers
         /// <param name="filterBy"></param>
         /// <param name="page"></param>
         /// <returns></returns>
-        /// 
+        ///
 
 
         public ActionResult GoalList(string sortBy = "Date", string filterBy = "All", int page = 0)
         {
-            var goals = goalService.GetGoalsByPage(User.Identity.GetUserId(), page, 5, sortBy, filterBy).ToList();
+            var goals = goalService.GetGoalsByPage(User.FindFirstValue(ClaimTypes.NameIdentifier), page, 5, sortBy, filterBy).ToList();
 
-            var goalsViewModel = Mapper.Map<IEnumerable<Goal>, IEnumerable<GoalListViewModel>>(goals).ToList();
+            var goalsViewModel = mapper.Map<IEnumerable<Goal>, IEnumerable<GoalListViewModel>>(goals).ToList();
             var goalsList = new GoalsPageViewModel(filterBy, sortBy);
             goalsList.GoalList = goalsViewModel;
 
             if (Request.IsAjaxRequest())
             {
-                return Json(goalsViewModel, JsonRequestBehavior.AllowGet);
+                return Json(goalsViewModel);
             }
             return View("ListOfGoals", goalsList);
         }
@@ -494,10 +504,10 @@ namespace SocialGoal.Web.Controllers
         public ActionResult EditUpdate(int id)
         {
             var update = updateService.GetUpdate(id);
-            UpdateFormModel editUpdate = Mapper.Map<Update, UpdateFormModel>(update);
+            UpdateFormModel editUpdate = mapper.Map<Update, UpdateFormModel>(update);
             if (update == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return PartialView("_EditUpdate", editUpdate);
         }
@@ -505,15 +515,15 @@ namespace SocialGoal.Web.Controllers
         [HttpPost]
         public ActionResult EditUpdate(UpdateFormModel newupdate)
         {
-            Update update = Mapper.Map<UpdateFormModel, Update>(newupdate);
+                Update update = mapper.Map<UpdateFormModel, Update>(newupdate);
             if (ModelState.IsValid)
             {
                 update.Goal = goalService.GetGoal(newupdate.GoalId);
                 updateService.EditUpdate(update);
-                var Updates = Mapper.Map<IEnumerable<Update>, IEnumerable<UpdateViewModel>>(updateService.GetUpdatesByGoal(newupdate.GoalId));
+                var Updates = mapper.Map<IEnumerable<Update>, IEnumerable<UpdateViewModel>>(updateService.GetUpdatesByGoal(newupdate.GoalId));
                 foreach (var item in Updates)
                 {
-                    item.IsSupported = updateSupportService.IsUpdateSupported(item.UpdateId, User.Identity.GetUserId());
+                    item.IsSupported = updateSupportService.IsUpdateSupported(item.UpdateId, User.FindFirstValue(ClaimTypes.NameIdentifier));
                 }
                 UpdateListViewModel updates = new UpdateListViewModel()
                 {
@@ -532,7 +542,7 @@ namespace SocialGoal.Web.Controllers
 
             if (update == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
             return PartialView("_DeleteUpdate", update);
         }
@@ -543,7 +553,7 @@ namespace SocialGoal.Web.Controllers
             var update = updateService.GetUpdate(id);
             if (update == null)
             {
-                return HttpNotFound();
+                return NotFound();
             }
 
             updateService.DeleteUpdate(id);
@@ -552,7 +562,7 @@ namespace SocialGoal.Web.Controllers
 
         public void SupportUpdate(int id)
         {
-            updateSupportService.CreateSupport(new UpdateSupport() { UserId = User.Identity.GetUserId(), UpdateId = id, UpdateSupportedDate = DateTime.Now });
+            updateSupportService.CreateSupport(new UpdateSupport() { UserId = User.FindFirstValue(ClaimTypes.NameIdentifier), UpdateId = id, UpdateSupportedDate = DateTime.Now });
         }
 
 
@@ -564,14 +574,14 @@ namespace SocialGoal.Web.Controllers
 
         public void UnSupportUpdate(int id)
         {
-            updateSupportService.DeleteSupport(id, User.Identity.GetUserId());
+            updateSupportService.DeleteSupport(id, User.FindFirstValue(ClaimTypes.NameIdentifier));
         }
 
         [HttpGet]
         public JsonResult DisplayUpdateSupportCount(int id)
         {
             int supportcount = updateSupportService.GetSupportcount(id);
-            return Json(supportcount, JsonRequestBehavior.AllowGet);
+            return Json(supportcount);
         }
 
         public PartialViewResult SupportersOfUpdate(int id)

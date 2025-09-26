@@ -3,4 +3,4 @@
 Hello <br />
 
 I invite you to join Social Goal and enjoy your time!
-<a href="@Url.Abs(Url.Action("Login", "Account", new { guid = ViewBag.group }))">Join Now</a>
+<a href="@(Context.Request.Scheme + "://" + Context.Request.Host + Url.Action("Login", "Account", new { guid = ViewBag.group }))">Join Now</a>

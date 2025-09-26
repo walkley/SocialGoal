@@ -1,18 +1,22 @@
-﻿using System.Web.Mvc;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
+
 
 namespace SocialGoal.Web.Core.Helpers
 {
     public class BaseHtmlHelper
     {
-        private readonly HtmlHelper _html;
-        private readonly UrlHelper _url;
+        private readonly IHtmlHelper _html;
+        private readonly IUrlHelper _url;
 
-        public BaseHtmlHelper(HtmlHelper html, UrlHelper url)
+        public BaseHtmlHelper(IHtmlHelper html, IUrlHelper url)
         {
             _html = html;
             _url = url;
         }
-        protected HtmlHelper Html { get { return _html; } }
-        protected UrlHelper Url { get { return _url; } }
+        protected IHtmlHelper Html { get { return _html; } }
+        protected IUrlHelper Url { get { return _url; } }
     }
 }

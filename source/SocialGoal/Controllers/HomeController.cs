@@ -1,16 +1,29 @@
-﻿using SocialGoal.Service;
+using SocialGoal.Service;
 using SocialGoal.Web.Core.Models;
 using SocialGoal.Web.Services;
 using SocialGoal.Web.ViewModels;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Web;
-using System.Web.Mvc;
-using Microsoft.AspNet.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
+using SocialGoal.Model.Models;
+
 
 namespace SocialGoal.Controllers
 {
+    public static class RequestExtensions
+    {
+        public static bool IsAjaxRequest(this Microsoft.AspNetCore.Http.HttpRequest request)
+        {
+            if (request == null)
+                throw new ArgumentNullException(nameof(request));
+
+            return request.Headers["X-Requested-With"] == "XMLHttpRequest";
+        }
+    }
     [Authorize]
     public class HomeController : Controller
     {
@@ -30,9 +43,10 @@ namespace SocialGoal.Controllers
         ICommentUserService commentUserService;
         IGroupCommentUserService groupCommentUserService;
         IGroupUpdateUserService groupUpdateUserService;
+        private readonly UserManager<ApplicationUser> _userManager;
         private readonly CreateNotificationList notificationListCreation = new CreateNotificationList();
 
-        public HomeController(IMetricService metricService, IFocusService focusService, IGoalService goalService, ICommentService commentService, IUpdateService updateService, ISupportService supportService, IUserService userService, IGroupUserService groupUserService, IGroupService groupService, IGroupGoalService groupGoalService, IGroupUpdateService groupupdateService, IGroupCommentService groupcommentService, IFollowUserService followUserService, IGroupUpdateUserService groupUpdateUserService, IGroupCommentUserService groupCommentUserService, ICommentUserService commentUserService)
+        public HomeController(IMetricService metricService, IFocusService focusService, IGoalService goalService, ICommentService commentService, IUpdateService updateService, ISupportService supportService, IUserService userService, IGroupUserService groupUserService, IGroupService groupService, IGroupGoalService groupGoalService, IGroupUpdateService groupupdateService, IGroupCommentService groupcommentService, IFollowUserService followUserService, IGroupUpdateUserService groupUpdateUserService, IGroupCommentUserService groupCommentUserService, ICommentUserService commentUserService, UserManager<ApplicationUser> userManager)
         {
             this.metricService = metricService;
             this.focusService = focusService;
@@ -50,6 +64,7 @@ namespace SocialGoal.Controllers
             this.groupCommentUserService = groupCommentUserService;
             this.groupUpdateUserService = groupUpdateUserService;
             this.commentUserService = commentUserService;
+            this._userManager = userManager;
         }
 
         /// <summary>
@@ -57,7 +72,7 @@ namespace SocialGoal.Controllers
         /// </summary>
         /// <param name="page"></param>
         /// <returns></returns>
-        public ActionResult Index(int page = 0)     
+        public ActionResult Index(int page = 0)
         {
             int noOfRecords = 10;
             HomeViewModel dashboard = new HomeViewModel()
@@ -66,7 +81,7 @@ namespace SocialGoal.Controllers
                 Count = GetNotifications(page, noOfRecords).Count()
             };
 
-            if (Request.IsAjaxRequest())
+            if (RequestExtensions.IsAjaxRequest(Request))
             {
                 if (dashboard.Count != 0)
                     return PartialView("Notification", dashboard);
@@ -117,7 +132,7 @@ namespace SocialGoal.Controllers
         /// <returns></returns>
         public IEnumerable<NotificationsViewModel> GetNotifications(int page, int noOfRecords)
         {
-            var notifications = notificationListCreation.GetNotifications(User.Identity.GetUserId(), goalService, commentService, updateService, supportService, userService, groupService, groupUserService, groupGoalService, groupcommentService, groupupdateService, followUserService, groupCommentUserService, commentUserService, groupUpdateUserService);
+            var notifications = notificationListCreation.GetNotifications(_userManager.GetUserId(User), goalService, commentService, updateService, supportService, userService, groupService, groupUserService, groupGoalService, groupcommentService, groupupdateService, followUserService, groupCommentUserService, commentUserService, groupUpdateUserService);
 
             var skipNotifications = noOfRecords * page;
             notifications = notifications.Skip(skipNotifications).Take(noOfRecords);

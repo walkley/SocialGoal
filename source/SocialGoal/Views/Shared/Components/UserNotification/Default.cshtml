@@ -1,0 +1,103 @@
+
+@model SocialGoal.Web.ViewModels.HomeViewModel
+
+@if (Model.Notification.Count() > 0)
+{
+    <div class="span12">
+        <table class="table table-striped">
+            @foreach (var item in Model.Notification)
+            {
+                <tr>
+                    <td>
+                        @if (item.NotificationType == 0) @* Goal *@
+                        {
+                            <a href="@Url.Action("GoalIndex", "Goal", new { id = item.GoalId })">
+                                <i class="icon-ok-sign"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 1) @* Comment *@
+                        {
+                            <a href="@Url.Action("GoalIndex", "Goal", new { id = item.GoalId })">
+                                <i class="icon-comment"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 2) @* Support *@
+                        {
+                            <a href="@Url.Action("GoalIndex", "Goal", new { id = item.GoalId })">
+                                <i class="icon-thumbs-up"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 3) @* Update *@
+                        {
+                            <a href="@Url.Action("GoalIndex", "Goal", new { id = item.GoalId })">
+                                <i class="icon-refresh"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 4) @* Group *@
+                        {
+                            <a href="@Url.Action("Index", "Group", new { id = item.GroupId })">
+                                <i class="icon-group"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 5) @* GroupGoal *@
+                        {
+                            <a href="@Url.Action("Index", "GroupGoal", new { id = item.GroupGoalId })">
+                                <i class="icon-ok-sign"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 6) @* GroupUpdate *@
+                        {
+                            <a href="@Url.Action("Index", "GroupGoal", new { id = item.GroupGoalId })">
+                                <i class="icon-refresh"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 7) @* GroupComment *@
+                        {
+                            <a href="@Url.Action("Index", "GroupGoal", new { id = item.GroupGoalId })">
+                                <i class="icon-comment"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 8) @* CommentUser *@
+                        {
+                            <a href="@Url.Action("GoalIndex", "Goal", new { id = item.GoalId })">
+                                <i class="icon-comment"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 9) @* GroupCommentUser *@
+                        {
+                            <a href="@Url.Action("Index", "GroupGoal", new { id = item.GroupGoalId })">
+                                <i class="icon-comment"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                        else if (item.NotificationType == 10) @* GroupUpdateUser *@
+                        {
+                            <a href="@Url.Action("Index", "GroupGoal", new { id = item.GroupGoalId })">
+                                <i class="icon-refresh"></i>
+                                @(item.ToString())
+                            </a>
+                        }
+                    </td>
+                    <td style="width: 20%">
+                        @item.CreatedDate.ToString("dd-MMM-yyyy")
+                    </td>
+                </tr>
+            }
+        </table>
+    </div>
+}
+else
+{
+    <div class="span12">
+        <h4>No notifications</h4>
+    </div>
+}

@@ -1,0 +1,29 @@
+
+@using Microsoft.AspNetCore.Identity
+@model IEnumerable<SocialGoal.Model.Models.Goal>
+
+@if (Model.Count() == 0)
+{
+    <div class="alert alert-info">No goals to display</div>
+}
+
+@foreach (var item in Model.Take(10))
+{
+    <table class="table">
+        <tbody>
+            <tr>
+                <td class="span1"><i class="icon-flag" /></td>
+                <td class="span9">@Html.ActionLink(item.GoalName, "Index", "Goal", new { id = item.GoalId }, new { @title = item.GoalName })
+                </td>
+                <td class="span2"><a id="UnSupport" href="#" onclick="UnSupportGoal(@item.GoalId);" style="float:right"><small>Unfollow</small>
+                </a>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+}
+
+@if (Model.Count() > 10)
+{
+    @Html.ActionLink("See All", "GoalList", "Goal", new { filterBy = "My Followed Goals" }, new { @style = "float:right;" })
+}

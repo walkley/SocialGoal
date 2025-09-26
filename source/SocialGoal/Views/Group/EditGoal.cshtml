@@ -1,4 +1,5 @@
-﻿@model SocialGoal.Web.ViewModels.GroupGoalFormModel
+@model SocialGoal.Web.ViewModels.GroupGoalFormModel
+@using System.Security.Claims
 @{
     ViewBag.Title = "Create Goal";
     Layout = "~/Views/Shared/_PageLayout.cshtml";
@@ -80,14 +81,14 @@
                     @Html.ValidationMessageFor(model => model.FocusId)
                 </td>
                 <td>
-                    @Html.Hidden("UserId", User.Identity.GetUserId())
-                    
+                    @Html.Hidden("UserId", User.FindFirstValue(ClaimTypes.NameIdentifier))
+
                     @Html.HiddenFor(m=>m.GroupGoalId)
                     @Html.HiddenFor(m=>m.GroupUserId)
                 </td>
             </tr>
-            
-            
+
+
             <tr>
                 <td>
                 Target
@@ -104,10 +105,10 @@
                   <td>
                         @Html.TextBoxFor(model => model.AssignedTo, new { id = "AssignedUser", value = "", placeholder = "Assigned To", @readonly = "readonly",@class="span8" })
                         <a href="#"  id="assigngoalsinfo" rel ="popover" data-content= "You can seach the user by clicking on the search button and assign the current goal for him. " data-trigger ="hover" data-placement="top" data-originals-title ="Assign Goals">
-                            <i class="icon-info-sign"></i> 
+                            <i class="icon-info-sign"></i>
                         </a>
-                        <a data-toggle="modal" href="#searchMember" onclick="SearchMember('@Model.GroupId');" class="btn btn-primary" title ="You can assign Goals to the members of the group">Search </a>  
-                        <a data-toggle="modal" id= "removeassignedto" href="#" onclick="RemoveAssigned()" class="btn" title ="You can remove the assigned user">Remove </a>                          
+                        <a data-toggle="modal" href="#searchMember" onclick="SearchMember('@Model.GroupId');" class="btn btn-primary" title ="You can assign Goals to the members of the group">Search </a>
+                        <a data-toggle="modal" id= "removeassignedto" href="#" onclick="RemoveAssigned()" class="btn" title ="You can remove the assigned user">Remove </a>
                         @Html.HiddenFor(m => m.AssignedGroupUserId, new { @id = "assignedgroupuserId" })
                   </td>
                 </tr>
@@ -122,11 +123,11 @@
                 </td>
                 </tr>
         </table>
-       
-      
+
+
 
     }
-    
+
 </div>
 @*<style type="text/css">
     input, button

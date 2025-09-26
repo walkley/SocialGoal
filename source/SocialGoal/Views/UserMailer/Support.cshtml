@@ -5,6 +5,5 @@
 Hello<br />
 
 I invite you to join Social Goal and enjoy your time!
-<a href="@Url.Abs(Url.Action("Login", "Account", new { guid = ViewBag.goal }))">Join Now</a>
-
+<a href="@Url.Action("Login", "Account", new { guid = ViewBag.goal }, Context.Request.Scheme)">Join Now</a>
 

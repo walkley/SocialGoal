@@ -1,4 +1,4 @@
-﻿@model SocialGoal.Models.LoginViewModel
+@model SocialGoal.Models.LoginViewModel
 
 @{
     ViewBag.Title = "Log in";
@@ -31,7 +31,7 @@
             <div class="row">
                 <div class="col-md-8">
                     <section id="loginForm">
-                        @using (Html.BeginForm("Login", "Account", new { ReturnUrl = ViewBag.ReturnUrl }, FormMethod.Post, new { @class = "form-horizontal", role = "form" }))
+                        @using (Html.BeginForm("Login", "Account", new { ReturnUrl = ViewBag.ReturnUrl }, FormMethod.Post, false, new { @class = "form-horizontal", role = "form" }))
                         {
                             @Html.AntiForgeryToken()
                             <h4>Use a local account to log in.</h4>
@@ -83,7 +83,11 @@
 
 
 @*@section Scripts {
-    @Scripts.Render("~/bundles/jqueryval")
+    <script src="~/Scripts/jquery.validate.unobtrusive.js"></script>
+<script src="~/Scripts/jquery.validate.min.js"></script>
+<script src="~/Scripts/jquery.validate.js"></script>
+<script src="~/Scripts/jquery.validate-vsdoc.js"></script>
+<script src="~/Scripts/jquery.validate.unobtrusive.min.js"></script>
 }*@
 <script src="~/Scripts/jquery.validate-vsdoc.js"></script>
 <script src="~/Scripts/jquery.validate.js"></script>

@@ -1,11 +1,11 @@
-﻿@model IEnumerable<SocialGoal.Web.ViewModels.FollowingViewModel>
+@model IEnumerable<SocialGoal.Web.ViewModels.FollowingViewModel>
 @foreach (var item in Model)
 {
     <table class="table">
         <tr class="span12">
             <td class="span1">
                 <a href="@Url.Action("UserProfile", "Account", new { id = item.UserId }, null)" >
-                    @Html.User().Avatar(item.ProfilePicUrl)
+                    <img src="@item.ProfilePicUrl" alt="@item.UserName's avatar" class="user-avatar" />
                 </a>
             </td>
             <td class="span5">
@@ -13,5 +13,5 @@
             </td>
         </tr>
     </table>
-              
+
 }

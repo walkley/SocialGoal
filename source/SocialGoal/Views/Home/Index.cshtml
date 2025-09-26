@@ -25,8 +25,8 @@
               <li><a href="#FollowedGoals">Followed Goals</a></li>          
             </ul> 
             <div class="tab-content" style="max-height:220px;overflow-y:auto;">
-              <div class="tab-pane active" id="MyGoals">@{ Html.RenderAction("MyGoals", "Goal"); }</div>
-              <div class="tab-pane" id="FollowedGoals">@{ Html.RenderAction("GoalsFollowing", "Goal"); }</div>    
+              <div class="tab-pane active" id="MyGoals">@await Component.InvokeAsync("MyGoals")</div>
+              <div class="tab-pane" id="FollowedGoals">@await Component.InvokeAsync("GoalsFollowing")</div>    
             </div>
    
         </div>
@@ -37,8 +37,8 @@
               <li><a href="#FollowedGroups">FollowedGroups</a></li>          
             </ul> 
             <div class="tab-content" style="max-height:220px;overflow-y:auto;">
-              <div class="tab-pane active" id="MyGroups">@{ Html.RenderAction("GroupsView", "Group"); }</div>
-              <div class="tab-pane" id="FollowedGroups">@{ Html.RenderAction("FollowedGroups", "Group"); }</div>    
+              <div class="tab-pane active" id="MyGroups">@await Component.InvokeAsync("GroupsView")</div>
+              <div class="tab-pane" id="FollowedGroups">@await Component.InvokeAsync("FollowedGroups")</div>    
             </div>
         </div>
      
@@ -116,7 +116,6 @@
 
    
 </script>
-
 
 
 

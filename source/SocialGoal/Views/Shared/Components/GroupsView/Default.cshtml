@@ -1,0 +1,27 @@
+
+@model IEnumerable<SocialGoal.Web.ViewModels.GroupsItemViewModel>
+
+<div id="divMyGroup" style="height: 150px;">
+@if (Model.Count() == 0)
+{
+    <div class="alert alert-info">No groups to display</div>
+}
+
+@foreach (var item in Model.Take(10))
+{
+    <table class="table">
+        <tbody>
+            <tr>
+                <td class="span1"><i class="icon-th" /></td>
+                <td class="span11">@Html.ActionLink(item.GroupName, "Index", "Group", new { id = item.GroupId }, new { @title = item.GroupName })
+                </td>
+            </tr>
+        </tbody>
+    </table>
+}
+</div>
+
+@if (Model.Count() > 10)
+{
+    @Html.ActionLink("See All", "GroupList", "Group", new { filter = "MyGroups" }, new { @style = "float:right;" })
+}

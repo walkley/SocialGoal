@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNet.Identity.EntityFramework;
+using Microsoft.AspNetCore.Identity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,7 +18,7 @@ namespace SocialGoal.Model.Models
 
         public string FirstName { get; set; }
 
-        public string LastName { get; set; }       
+        public string LastName { get; set; }
 
         public string ProfilePicUrl { get; set; }
 
@@ -36,7 +36,7 @@ namespace SocialGoal.Model.Models
 
         public virtual ICollection<FollowUser> FollowToUser { get; set; }
 
-        public virtual ICollection<GroupRequest> GroupRequests { get; set; }        
+        public virtual ICollection<GroupRequest> GroupRequests { get; set; }
 
         public string DisplayName
         {

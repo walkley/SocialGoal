@@ -1,14 +1,16 @@
-﻿using Microsoft.AspNet.Identity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Identity;
+
 
 namespace SocialGoal.Tests.Helpers
 {
-    public class MemoryUser : IUser
+    public class MemoryUser
     {
         private readonly IList<UserLoginInfo> _logins;
         private readonly IList<Claim> _claims;
@@ -49,19 +51,19 @@ namespace SocialGoal.Tests.Helpers
         private Dictionary<UserLoginInfo, MemoryUser> _logins = new Dictionary<UserLoginInfo, MemoryUser>();
         //new LoginComparer()
 
-        public Task CreateAsync(MemoryUser user)
+        public Task<IdentityResult> CreateAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             _users[user.Id] = user;
-            return Task.FromResult(0);
+            return Task.FromResult(IdentityResult.Success);
         }
 
-        public Task UpdateAsync(MemoryUser user)
+        public Task<IdentityResult> UpdateAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             _users[user.Id] = user;
-            return Task.FromResult(0);
+            return Task.FromResult(IdentityResult.Success);
         }
 
-        public Task<MemoryUser> FindByIdAsync(string userId)
+        public Task<MemoryUser> FindByIdAsync(string userId, CancellationToken cancellationToken)
         {
             if (_users.ContainsKey(userId))
             {
@@ -82,19 +84,20 @@ namespace SocialGoal.Tests.Helpers
             }
         }
 
-        public Task<MemoryUser> FindByNameAsync(string userName)
+        public Task<MemoryUser> FindByNameAsync(string userName, CancellationToken cancellationToken)
         {
             return Task.FromResult(Users.Where(u => u.UserName.ToUpper() == userName.ToUpper()).FirstOrDefault());
         }
 
-        public Task AddLoginAsync(MemoryUser user, UserLoginInfo login)
+        public Task AddLoginAsync(MemoryUser user, UserLoginInfo login, CancellationToken cancellationToken)
         {
             user.Logins.Add(login);
             _logins[login] = user;
             return Task.FromResult(0);
         }
 
-        public Task RemoveLoginAsync(MemoryUser user, UserLoginInfo login)
+        // This method is being kept for backward compatibility
+        private Task RemoveLoginWithInfoAsync(MemoryUser user, UserLoginInfo login, CancellationToken cancellationToken)
         {
             var logs = user.Logins.Where(l => l.ProviderKey == login.ProviderKey && l.LoginProvider == login.LoginProvider).ToList();
             foreach (var l in logs)
@@ -105,89 +108,181 @@ namespace SocialGoal.Tests.Helpers
             return Task.FromResult(0);
         }
 
-        public Task<IList<UserLoginInfo>> GetLoginsAsync(MemoryUser user)
+        public Task RemoveLoginAsync(MemoryUser user, string loginProvider, string providerKey, CancellationToken cancellationToken)
+        {
+            var logs = user.Logins.Where(l => l.ProviderKey == providerKey && l.LoginProvider == loginProvider).ToList();
+            foreach (var l in logs)
+            {
+                user.Logins.Remove(l);
+                _logins[l] = null;
+            }
+            return Task.FromResult(0);
+        }
+
+        public Task<IList<UserLoginInfo>> GetLoginsAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             return Task.FromResult(user.Logins);
         }
 
-        public Task<MemoryUser> FindAsync(UserLoginInfo login)
+        public Task<MemoryUser> FindByLoginAsync(string loginProvider, string providerKey, CancellationToken cancellationToken)
         {
-            if (_logins.ContainsKey(login))
+            var login = _logins.Keys.FirstOrDefault(l => l.LoginProvider == loginProvider && l.ProviderKey == providerKey);
+            if (login != null && _logins.ContainsKey(login))
             {
                 return Task.FromResult(_logins[login]);
             }
             return Task.FromResult<MemoryUser>(null);
         }
 
-        public Task AddToRoleAsync(MemoryUser user, string role)
+        public Task AddToRoleAsync(MemoryUser user, string role, CancellationToken cancellationToken)
         {
             user.Roles.Add(role);
             return Task.FromResult(0);
         }
 
-        public Task RemoveFromRoleAsync(MemoryUser user, string role)
+        public Task RemoveFromRoleAsync(MemoryUser user, string role, CancellationToken cancellationToken)
         {
             user.Roles.Remove(role);
             return Task.FromResult(0);
         }
 
-        public Task<IList<string>> GetRolesAsync(MemoryUser user)
+        public Task<IList<string>> GetRolesAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             return Task.FromResult(user.Roles);
         }
 
-        public Task<bool> IsInRoleAsync(MemoryUser user, string role)
+        public Task<bool> IsInRoleAsync(MemoryUser user, string role, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return Task.FromResult(user.Roles.Contains(role));
         }
 
-        public Task<IList<Claim>> GetClaimsAsync(MemoryUser user)
+        public Task<IList<MemoryUser>> GetUsersInRoleAsync(string roleName, CancellationToken cancellationToken)
+        {
+            IList<MemoryUser> usersInRole = _users.Values.Where(u => u.Roles.Contains(roleName)).ToList();
+            return Task.FromResult(usersInRole);
+        }
+
+        public Task<IList<Claim>> GetClaimsAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             return Task.FromResult(user.Claims);
         }
 
-        public Task AddClaimAsync(MemoryUser user, Claim claim)
+        public Task AddClaimAsync(MemoryUser user, Claim claim, CancellationToken cancellationToken)
         {
             user.Claims.Add(claim);
             return Task.FromResult(0);
         }
 
-        public Task RemoveClaimAsync(MemoryUser user, Claim claim)
+        public Task AddClaimsAsync(MemoryUser user, IEnumerable<Claim> claims, CancellationToken cancellationToken)
+        {
+            foreach (var claim in claims)
+            {
+                user.Claims.Add(claim);
+            }
+            return Task.FromResult(0);
+        }
+
+        public Task RemoveClaimAsync(MemoryUser user, Claim claim, CancellationToken cancellationToken)
         {
             user.Claims.Remove(claim);
             return Task.FromResult(0);
         }
 
-        public Task SetPasswordHashAsync(MemoryUser user, string passwordHash)
+        public Task RemoveClaimsAsync(MemoryUser user, IEnumerable<Claim> claims, CancellationToken cancellationToken)
+        {
+            foreach (var claim in claims)
+            {
+                user.Claims.Remove(claim);
+            }
+            return Task.FromResult(0);
+        }
+
+        public Task SetPasswordHashAsync(MemoryUser user, string passwordHash, CancellationToken cancellationToken)
         {
             user.PasswordHash = passwordHash;
             return Task.FromResult(0);
         }
 
-        public Task<string> GetPasswordHashAsync(MemoryUser user)
+        public Task<string> GetPasswordHashAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             return Task.FromResult(user.PasswordHash);
         }
 
-        public Task SetSecurityStampAsync(MemoryUser user, string stamp)
+        public Task SetSecurityStampAsync(MemoryUser user, string stamp, CancellationToken cancellationToken)
         {
             user.SecurityStamp = stamp;
             return Task.FromResult(0);
         }
 
-        public Task<string> GetSecurityStampAsync(MemoryUser user)
+        public Task<string> GetSecurityStampAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             return Task.FromResult(user.SecurityStamp);
         }
 
-        public Task DeleteAsync(MemoryUser user)
+    public Task<IdentityResult> DeleteAsync(MemoryUser user, CancellationToken cancellationToken)
+    {
+        if (user == null)
         {
-            throw new NotImplementedException();
+            throw new ArgumentNullException(nameof(user));
         }
 
-        public Task<bool> HasPasswordAsync(MemoryUser user)
+        if (_users.ContainsKey(user.Id))
+        {
+            _users.Remove(user.Id);
+            return Task.FromResult(IdentityResult.Success);
+        }
+
+        return Task.FromResult(IdentityResult.Failed(new IdentityError { Description = "User not found" }));
+    }
+
+        public Task<bool> HasPasswordAsync(MemoryUser user, CancellationToken cancellationToken)
         {
             return Task.FromResult(user.PasswordHash != null);
+        }
+
+        public Task<string> GetUserIdAsync(MemoryUser user, System.Threading.CancellationToken cancellationToken)
+        {
+            return Task.FromResult(user.Id);
+        }
+
+        public Task<string> GetUserNameAsync(MemoryUser user, System.Threading.CancellationToken cancellationToken)
+        {
+            return Task.FromResult(user.UserName);
+        }
+
+        public Task SetUserNameAsync(MemoryUser user, string userName, System.Threading.CancellationToken cancellationToken)
+        {
+            user.UserName = userName;
+            return Task.FromResult(0);
+        }
+
+        public Task<string> GetNormalizedUserNameAsync(MemoryUser user, System.Threading.CancellationToken cancellationToken)
+        {
+            // Assuming normalized name is just uppercase version
+            return Task.FromResult(user.UserName?.ToUpperInvariant());
+        }
+
+        public Task SetNormalizedUserNameAsync(MemoryUser user, string normalizedName, System.Threading.CancellationToken cancellationToken)
+        {
+            // Normalization is handled by the UserManager, so we don't need to store it separately
+            return Task.FromResult(0);
+        }
+
+        public Task ReplaceClaimAsync(MemoryUser user, Claim claim, Claim newClaim, CancellationToken cancellationToken)
+        {
+            var matchingClaims = user.Claims.Where(c => c.Type == claim.Type && c.Value == claim.Value).ToList();
+            foreach (var matchingClaim in matchingClaims)
+            {
+                user.Claims.Remove(matchingClaim);
+            }
+            user.Claims.Add(newClaim);
+            return Task.FromResult(0);
+        }
+
+        public Task<IList<MemoryUser>> GetUsersForClaimAsync(Claim claim, CancellationToken cancellationToken)
+        {
+            var users = _users.Values.Where(u => u.Claims.Any(c => c.Type == claim.Type && c.Value == claim.Value)).ToList();
+            return Task.FromResult<IList<MemoryUser>>(users);
         }
     }
 }

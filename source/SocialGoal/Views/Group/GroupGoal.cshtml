@@ -1,8 +1,8 @@
-﻿@using Microsoft.AspNet.Identity
+@using Microsoft.AspNet.Identity
 @model SocialGoal.Web.ViewModels.GroupGoalViewModel
 @{
     ViewBag.Title = Model.GoalName;
-    ViewContext.Controller.ViewBag.IncludeJqplot = true;
+    ViewBag.IncludeJqplot = true;
     Layout = "~/Views/Shared/_GoalLayout.cshtml";
     string goalstatus = Model.GoalStatus.GoalStatusType;
 }
@@ -16,7 +16,7 @@
     <div class="span5">
         <h4>@Model.GoalName
             @if (User.Identity.GetUserId() == Model.UserId)
-            { 
+            {
                 <a href="#" id ="editBtn" onclick ="location.href='@Url.Action("EditGoal", "Group", new { id = Model.GroupGoalId })'" style="padding-right:5px;">
                     <span rel="tooltip" title="Edit Goal"><i class="icon-edit"></i></span></a>
                 <a href="#" id="delete" onclick="window.location.href='@Url.Action("DeleteGoal", "Group", new { id = Model.GroupGoalId })'">
@@ -30,7 +30,7 @@
         </div>
         @if (Model.AssignedGroupUserId != 0)
         {
-               
+
             <div>
                 <small>Assigned to @Html.ActionLink(Model.AssignedTo, "UserProfile", "Account", new { id = Model.AssignedUserId })</small>
             </div>
@@ -52,12 +52,12 @@
                 <td>
                     <strong>Metric</strong> :
                     @if (Model.Metric == null)
-                    { 
+                    {
 
                         <text> No Metric</text>
                     }
                     else
-                    { 
+                    {
                         @Html.DisplayFor(m => m.Metric.Type)
                     }
                 </td>
@@ -70,7 +70,7 @@
                         <text>No Target</text>
                     }
                     else
-                    { 
+                    {
                         @Html.DisplayFor(m => m.Target)
                     }
                 </td>
@@ -88,7 +88,7 @@
 <!--Update section -->
 <div class="span6 well" style="margin-left: 0px;">
     @if (User.Identity.GetUserId() == Model.UserId || User.Identity.GetUserId() == Model.AssignedUserId)
-    {        
+    {
         <table class="table" id="UpdatePostContent">
             <thead>
                 <tr>
@@ -104,14 +104,14 @@
             </tr>
                <tr><td><div id="UpdateGroupValidation"></div></td></tr>
             @if (Model.Metric != null)
-            {		
+            {
                 <tr>
                     <td class="span8">
                         <div class="input-append">
                             @if (Model.Metric != null)
-                            { 
-                                <input type="text" id="Status" onfocus="clearStatusError()" class="span8" placeholder="Add new satus of this update" /> 
-                                
+                            {
+                                <input type="text" id="Status" onfocus="clearStatusError()" class="span8" placeholder="Add new satus of this update" />
+
                             }
                             @if (Model.Metric != null && Model.Target != null)
                             { <span class="add-on">/@Model.Target @Model.Metric.Type</span>}
@@ -129,7 +129,7 @@
         </table>
     }
     <div id="divgroupupdate" style="margin: 0px;">
-        @{ Html.RenderAction("DisplayUpdates", "Group", Model.GroupGoalId); }
+        @await Component.InvokeAsync("DisplayUpdates", new { id = Model.GroupGoalId })
     </div>
     <div id="divInviteLayer" class="jqmWindow">
         <div id="handle" style="float: right">
@@ -144,7 +144,7 @@
 <div class="span6">
     <!--Graph  section -->
     <div id="graph">
-        @Html.Action("ReportPage", new { id = Model.GroupGoalId })
+        @await Component.InvokeAsync("ReportPage", new { id = Model.GroupGoalId })
     </div>
     <!--Graph Section End here-->
     <!--update status section  -->
@@ -158,15 +158,15 @@
                 <input type="button" id="grpdrpdwnBtn" class="btn btn-primary pull-right" value="Change"
                     onclick="GroupDropDownChange();" disabled="disabled" />
             </div>
-               
-           
+
+
         }
         else
         {
-            
+
             @Html.DisplayFor(m => m.GoalStatus.GoalStatusType)
-               
-                                       
+
+
         }
     </div>
 </div>
@@ -175,14 +175,14 @@
 <script type="text/javascript">
     $(document).ready(function(){
     var goalstatus="@goalstatus";
-    
+
     if(goalstatus=="Completed")
     {
         $("#UpdatePostContent").hide();
         $(".EditDeleteUpdate").hide();
     }
-    
-    
+
+
     });
     $(function () {
         $("#Update").focus(function () {
@@ -201,18 +201,18 @@
             $('#graph').html(data);
         });
     });
- 
+
     $('#GroupUpdate').focusout(function(){
         if ($('#GroupUpdate').val() == '') {
 			 $('#UpdateGroupValidation').html('<label class="field-validation-error">Please Enter Update</label>');
-		}        
-		else 
+		}
+		else
         {
             $('#UpdateGroupValidation').html('');
         }
-    
+
     });
- 
+
 </script>
 <script type="text/javascript">
     function saveGroupUpdate(target, metric) {
@@ -228,7 +228,7 @@
 
         if (CurrUpdte == '') {
             $('#UpdateGroupValidation').html('<label class="field-validation-error">Please Enter Update</label>');
-            
+
         }
         else {
             $('#UpdateGroupValidation').html('');
@@ -246,6 +246,6 @@
                 $("#statusError").html('<label style="color:red;">Enter a valid status.</label>');
             }
         }
-    }  
+    }
 
 </script>

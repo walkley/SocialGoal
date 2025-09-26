@@ -1,4 +1,4 @@
-﻿@using SocialGoal.Models;
+@using SocialGoal.Models;
 @using Microsoft.AspNet.Identity;
 @{
     ViewBag.Title = "Manage Account";
@@ -19,11 +19,15 @@
         }
 
         <section id="externalLogins">
-            @Html.Action("RemoveAccountList")
+            @await Component.InvokeAsync("RemoveAccount")
             @Html.Partial("_ExternalLoginsListPartial", new { Action = "LinkLogin", ReturnUrl = ViewBag.ReturnUrl })
         </section>
     </div>
 </div>
 @section Scripts {
-    @Scripts.Render("~/bundles/jqueryval")
+    <script src="~/Scripts/jquery.validate.unobtrusive.js"></script>
+<script src="~/Scripts/jquery.validate.min.js"></script>
+<script src="~/Scripts/jquery.validate.js"></script>
+<script src="~/Scripts/jquery.validate-vsdoc.js"></script>
+<script src="~/Scripts/jquery.validate.unobtrusive.min.js"></script>
 }

@@ -4,11 +4,24 @@ using System.Linq;
 using System.Web;
 using Mvc.Mailer;
 using System.Net.Mail;
+using System.Dynamic;
 
 namespace SocialGoal.Web.Mailers
-{ 
-    public class UserMailer : MailerBase, IUserMailer     
+{
+    public class UserMailer : MailerBase, IUserMailer
     {
+        // Adding a ViewBag property that's accessible in the derived class
+        protected dynamic viewBag = new ExpandoObject();
+
+        // Method to get ViewBag data for templates
+        protected string GetViewBagData(string key)
+        {
+            IDictionary<string, object> dict = viewBag as IDictionary<string, object>;
+            if (dict != null && dict.ContainsKey(key))
+                return dict[key]?.ToString();
+            return null;
+        }
+
         public UserMailer() :
             base()
         {
@@ -27,7 +40,10 @@ namespace SocialGoal.Web.Mailers
         {
             var mailMessage = new MvcMailMessage { Subject = "Invite" };
             mailMessage.To.Add(email);
-            ViewBag.group = "gr:" + groupIdToken;
+
+            // Use direct dictionary access rather than ViewBag
+            ((IDictionary<string, object>)viewBag)["group"] = "gr:" + groupIdToken;
+
             PopulateBody(mailMessage, viewName: "Invite");
             return mailMessage;
         }
@@ -36,7 +52,7 @@ namespace SocialGoal.Web.Mailers
         {
             var mailMessage = new MvcMailMessage { Subject = "Support My Goal" };
             mailMessage.To.Add(email);
-            ViewBag.goal = "go:" + goalIdToken;
+            ((IDictionary<string, object>)viewBag)["goal"] = "go:" + goalIdToken;
             PopulateBody(mailMessage, viewName: "SupportGoal");
             return mailMessage;
         }
@@ -45,7 +61,7 @@ namespace SocialGoal.Web.Mailers
         {
             var mailMessage = new MvcMailMessage { Subject = "Reset Password" };
             mailMessage.To.Add(email);
-            ViewBag.token = "pwreset:" + passwordResetToken;
+            ((IDictionary<string, object>)viewBag)["token"] = "pwreset:" + passwordResetToken;
             PopulateBody(mailMessage,viewName:"PasswordReset");
             return mailMessage;
         }
@@ -54,7 +70,7 @@ namespace SocialGoal.Web.Mailers
         {
             var mailMessage = new MvcMailMessage { Subject = "Invitation to SocialGoal" };
             mailMessage.To.Add(email);
-            ViewBag.token = "reg:" + registrationToken;
+            ((IDictionary<string, object>)viewBag)["token"] = "reg:" + registrationToken;
             PopulateBody(mailMessage, viewName: "InviteNewUser");
             return mailMessage;
         }

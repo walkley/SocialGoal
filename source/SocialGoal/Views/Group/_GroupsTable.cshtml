@@ -1,4 +1,6 @@
-﻿@model GroupsPageViewModel
+@model GroupsPageViewModel
+@using X.PagedList.Mvc.Core
+@using X.PagedList.Web.Common
 @*
     Render out a table with its own paging.
     The pager will use ajax to request this partial again and will replace itself by inserting the html returned into the GroupPagingContainer
@@ -9,13 +11,13 @@
 {
     <table class="table">
         @Html.Partial("_GroupsTableRows", Model.GroupList)
-    </table>    
+    </table>
 
     @Html.PagedListPager(
-        Model.GroupList,
+        (X.PagedList.IPagedList)Model.GroupList,
         page => Url.Action("GroupList",
                 new { page, filter = Model.Filter }),
-                PagedListRenderOptions.EnableUnobtrusiveAjaxReplacing(new AjaxOptions { UpdateTargetId = "GroupPagingContainer" })
+                new PagedListRenderOptions { LiElementClasses = new string[] { "page-item" }, PageClasses = new string[] { "page-link" } }
         )
 }
 else

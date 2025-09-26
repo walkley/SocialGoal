@@ -1,6 +1,5 @@
-﻿
+
 using System;
-using System.Web.Mvc;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -17,13 +16,22 @@ using AutoMapper;
 using Moq;
 using System.Security;
 using System.Security.Principal;
+using System.Security.Claims;
 using System.Threading;
 using SocialGoal.Web.Core.Models;
-using System.Web;
 using System.Linq.Expressions;
 using SocialGoal.Web.Core.Authentication;
-using System.Web.Security;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using SocialGoal.Tests.Helpers;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Identity;
+using NUnit.Framework.Legacy;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using AutoMapper;
+
 
 namespace SocialGoal.Tests.Controllers
 {
@@ -50,6 +58,8 @@ namespace SocialGoal.Tests.Controllers
         Mock<IUserProfileRepository> userProfileRepository;
         Mock<IGroupUpdateSupportRepository> groupUpdateSupportRepository;
         Mock<IGroupUpdateUserRepository> groupUpdateUserRepository;
+        Mock<UserManager<ApplicationUser>> userManager;
+        Mock<IMapper> mapper;
         //Mock<CreateGroupFormModel> group;
         //Mock<FocusFormModel> focus;
         //Mock<GroupViewModel> groupView;
@@ -79,10 +89,11 @@ namespace SocialGoal.Tests.Controllers
         Mock<IIdentity> identity;
         Mock<IPrincipal> principal;
         Mock<HttpContext> httpContext;
-        Mock<HttpContextBase> contextBase;
-        Mock<HttpRequestBase> httpRequest;
-        Mock<HttpResponseBase> httpResponse;
+        Mock<HttpContext> contextBase;
+        Mock<HttpRequest> httpRequest;
+        Mock<HttpResponse> httpResponse;
         Mock<GenericPrincipal> genericPrincipal;
+        Mock<IResponseCookies> responseCookies;
 
 
         [SetUp]
@@ -109,12 +120,20 @@ namespace SocialGoal.Tests.Controllers
 
             unitOfWork = new Mock<IUnitOfWork>();
             controllerContext = new Mock<ControllerContext>();
-            contextBase = new Mock<HttpContextBase>();
+            contextBase = new Mock<HttpContext>();
             // httpContext = new Mock<HttpContext>();
-            httpRequest = new Mock<HttpRequestBase>();
-            httpResponse = new Mock<HttpResponseBase>();
+            httpRequest = new Mock<HttpRequest>();
+            httpResponse = new Mock<HttpResponse>();
             genericPrincipal = new Mock<GenericPrincipal>();
+            responseCookies = new Mock<IResponseCookies>();
 
+            // Setup UserManager mock with minimal configuration needed
+            var store = new Mock<IUserStore<ApplicationUser>>();
+            userManager = new Mock<UserManager<ApplicationUser>>(
+                store.Object, null, null, null, null, null, null, null, null);
+
+            // Setup mapper mock
+            mapper = new Mock<IMapper>();
 
             identity = new Mock<IIdentity>();
             principal = new Mock<IPrincipal>();
@@ -156,40 +175,48 @@ namespace SocialGoal.Tests.Controllers
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
 
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -208,12 +235,12 @@ namespace SocialGoal.Tests.Controllers
             IEnumerable<GroupGoal> fakegoal = new List<GroupGoal> {
             new GroupGoal{ GroupId = 1, Description="Test1Desc",GroupGoalId =1,GroupUser = grpUser},
              new GroupGoal{ GroupId = 1, Description="Test1Desc",GroupGoalId =1,GroupUser = grpUser},
-          
-          
+
+
           }.AsEnumerable();
             groupGoalRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupGoal, bool>>>())).Returns(fakegoal);
 
-            IEnumerable<Focus> fakeFocus = new List<Focus> 
+            IEnumerable<Focus> fakeFocus = new List<Focus>
             {
             new Focus { FocusId = 1, FocusName="Test1",GroupId = 1},
              new Focus { FocusId = 2, FocusName="Test2",GroupId = 1},
@@ -221,7 +248,7 @@ namespace SocialGoal.Tests.Controllers
           }.AsEnumerable();
             focusRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<Focus, bool>>>())).Returns(fakeFocus);
 
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
@@ -231,13 +258,12 @@ namespace SocialGoal.Tests.Controllers
 
 
 
-            Mapper.CreateMap<Group, GroupViewModel>();
-            Mapper.CreateMap<GroupGoal, GroupGoalViewModel>();
+            // AutoMapper already configured in SetUp
 
             ViewResult result = controller.Index(1) as ViewResult;
-            Assert.IsNotNull(result);
-            Assert.AreEqual("Index", result.ViewName);
-            Assert.IsInstanceOfType(typeof(GroupViewModel),
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.AreEqual("Index", result.ViewName);
+            ClassicAssert.IsInstanceOf(typeof(GroupViewModel),
                 result.ViewData.Model, "WrongType");
         }
 
@@ -245,7 +271,7 @@ namespace SocialGoal.Tests.Controllers
         [Test]
         public void Group_Goal_Page_View()
         {
-            //Arrange 
+            //Arrange
             GroupUser grpUser = new GroupUser()
             {
                 UserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"
@@ -271,20 +297,20 @@ namespace SocialGoal.Tests.Controllers
             IEnumerable<GoalStatus> fake = new List<GoalStatus> {
             new GoalStatus { GoalStatusId =1, GoalStatusType ="Inprogress"},
             new GoalStatus { GoalStatusId =2, GoalStatusType ="OnHold"},
-         
+
           }.AsEnumerable();
             goalStatusRepository.Setup(x => x.GetAll()).Returns(fake);
 
-            Mapper.CreateMap<GroupGoal, GroupGoalViewModel>();
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<GroupGoal, GroupGoalViewModel>());
             //Act
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             ViewResult result = controller.GroupGoal(1) as ViewResult;
 
             //Assert
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOfType(typeof(GroupGoalViewModel), result.ViewData.Model, "WrongType");
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(GroupGoalViewModel), result.ViewData.Model, "WrongType");
             var data = result.ViewData.Model as GroupGoalViewModel;
-            Assert.AreEqual("t", data.GoalName);
+            ClassicAssert.AreEqual("t", data.GoalName);
         }
 
         [Test]
@@ -292,18 +318,18 @@ namespace SocialGoal.Tests.Controllers
         {
             //Arrange
             GroupFormModel group = new GroupFormModel();
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             //Act
             PartialViewResult result = controller.CreateGroup() as PartialViewResult;
             //Assert
-            Assert.IsNotNull(result);
+            ClassicAssert.IsNotNull(result);
 
         }
 
         [Test]
         public void Group_name_Required()
         {
-            // Arrange 
+            // Arrange
             MemoryUser user = new MemoryUser("adarsh");
             ApplicationUser applicationUser = getApplicationUser();
             var userContext = new UserInfo
@@ -313,51 +339,58 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
 
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
 
 
-            // The MVC pipeline doesn't run, so binding and validation don't run. 
+            // The MVC pipeline doesn't run, so binding and validation don't run.
             controller.ModelState.AddModelError("", "mock error message");
 
-            // Act          
-            Mapper.CreateMap<GroupFormModel, Group>();
+            // Act
+            // AutoMapper already configured in SetUp
             GroupFormModel group = new GroupFormModel()
             {
                 GroupName = string.Empty,
@@ -369,8 +402,8 @@ namespace SocialGoal.Tests.Controllers
             var result = controller.CreateGroup(group) as ViewResult;
 
             // Assert - check that we are passing an invalid model to the view
-            Assert.AreEqual(false, result.ViewData.ModelState.IsValid);
-            Assert.AreEqual("CreateGroup", result.ViewName);
+            ClassicAssert.AreEqual(false, result.ViewData.ModelState.IsValid);
+            ClassicAssert.AreEqual("CreateGroup", result.ViewName);
 
         }
 
@@ -388,58 +421,65 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
 
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
 
-            // The MVC pipeline doesn't run, so binding and validation don't run. 
+            // The MVC pipeline doesn't run, so binding and validation don't run.
             controller.ModelState.AddModelError("", "mock error message");
 
 
-            // Act          
+            // Act
 
-            Mapper.CreateMap<GroupFormModel, Group>();
+            // AutoMapper already configured in SetUp
             GroupFormModel group = new GroupFormModel();
             group.Description = string.Empty;
             var result = (ViewResult)controller.CreateGroup(group);
             // Assert - check that we are passing an invalid model to the view
-            Assert.AreEqual(false, result.ViewData.ModelState.IsValid);
-            Assert.AreEqual("CreateGroup", result.ViewName);
+            ClassicAssert.AreEqual(false, result.ViewData.ModelState.IsValid);
+            ClassicAssert.AreEqual("CreateGroup", result.ViewName);
 
         }
 
@@ -456,31 +496,45 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
-            var formsAuthentication = new DefaultFormsAuthentication();
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
+
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
+
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
+
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
+
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
+
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
@@ -488,7 +542,7 @@ namespace SocialGoal.Tests.Controllers
 
 
             // Act
-            Mapper.CreateMap<GroupFormModel, Group>();
+            // AutoMapper already configured in SetUp
             GroupFormModel group = new GroupFormModel()
             {
                 UserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",
@@ -501,7 +555,7 @@ namespace SocialGoal.Tests.Controllers
             var result = (RedirectToRouteResult)controller.CreateGroup(group);
 
             // Assert
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
 
 
@@ -510,39 +564,39 @@ namespace SocialGoal.Tests.Controllers
         [Test]
         public void Focus_Name_Mandatory()
         {
-            // Arrange                    
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
-            // The MVC pipeline doesn't run, so binding and validation don't run. 
+            // Arrange
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
+            // The MVC pipeline doesn't run, so binding and validation don't run.
             controller.ModelState.AddModelError("", "mock error message");
-            // Act          
+            // Act
 
-            Mapper.CreateMap<FocusFormModel, Focus>();
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<FocusFormModel, Focus>());
             FocusFormModel focus = new FocusFormModel();
             focus.FocusName = string.Empty;
             var result = (ViewResult)controller.CreateFocus(focus);
 
             // Assert - check that we are passing an invalid model to the view
-            Assert.AreEqual(false, result.ViewData.ModelState.IsValid);
-            Assert.AreEqual("CreateFocus", result.ViewName);
+            ClassicAssert.AreEqual(false, result.ViewData.ModelState.IsValid);
+            ClassicAssert.AreEqual("CreateFocus", result.ViewName);
         }
 
         [Test]
         public void Focus_Description_Mandatory()
         {
-            // Arrange                    
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
-            // The MVC pipeline doesn't run, so binding and validation don't run. 
+            // Arrange
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
+            // The MVC pipeline doesn't run, so binding and validation don't run.
             controller.ModelState.AddModelError("", "mock error message");
 
-            // Act          
-            Mapper.CreateMap<FocusFormModel, Focus>();
+            // Act
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<FocusFormModel, Focus>());
             FocusFormModel focus = new FocusFormModel();
             focus.Description = string.Empty;
             var result = (ViewResult)controller.CreateFocus(focus);
 
             // Assert - check that we are passing an invalid model to the view
-            Assert.AreEqual(false, result.ViewData.ModelState.IsValid);
-            Assert.AreEqual("CreateFocus", result.ViewName);
+            ClassicAssert.AreEqual(false, result.ViewData.ModelState.IsValid);
+            ClassicAssert.AreEqual("CreateFocus", result.ViewName);
         }
 
         [Test]
@@ -557,28 +611,42 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
-            var formsAuthentication = new DefaultFormsAuthentication();
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
+
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
+
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
+
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
+
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
+
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
 
@@ -596,13 +664,12 @@ namespace SocialGoal.Tests.Controllers
                 GroupId = 1
             };
 
-            //Create Mapping 
-            Mapper.CreateMap<FocusFormModel, Focus>();
-
+            //Create Mapping
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<FocusFormModel, Focus>());
 
             // Act
             var result = (RedirectToRouteResult)controller.CreateFocus(focus);
-            Assert.AreEqual("Focus", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Focus", result.RouteValues["action"]);
 
 
         }
@@ -630,13 +697,12 @@ namespace SocialGoal.Tests.Controllers
             IEnumerable<GroupGoal> fakegoal = new List<GroupGoal> {
             new GroupGoal{ GroupId = 1, Description="Test1Desc",GroupGoalId =1,FocusId =1,GroupUser = grpUser},
              new GroupGoal{ GroupId = 1, Description="Test1Desc",GroupGoalId =2,FocusId = 2,GroupUser = grpUser},
-          
-          
+
+
           }.AsEnumerable();
             groupGoalRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupGoal, bool>>>())).Returns(fakegoal);
 
-            Mapper.CreateMap<Focus, FocusViewModel>();
-            Mapper.CreateMap<GroupGoal, GroupGoalViewModel>();
+            // AutoMapper already configured in SetUp
 
 
             MemoryUser user = new MemoryUser("adarsh");
@@ -648,18 +714,17 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
 
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
@@ -667,26 +732,41 @@ namespace SocialGoal.Tests.Controllers
           }.AsEnumerable();
             userRepository.Setup(x => x.GetAll()).Returns(fakeUser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("abc");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
-            var formsAuthentication = new DefaultFormsAuthentication();
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
+
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
+
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
+
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
+
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
+
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
             ViewResult result = controller.Focus(1) as ViewResult;
-            Assert.IsNotNull(result);
-            Assert.AreEqual("Focus", result.ViewName);
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.AreEqual("Focus", result.ViewName);
 
 
         }
@@ -698,11 +778,11 @@ namespace SocialGoal.Tests.Controllers
 
             Group group = new Group() { GroupId = 1, GroupName = "Test", Description = "test" };
             groupRepository.Setup(x => x.GetById(1)).Returns(group);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             //Act
             ActionResult result = controller.CreateFocus(1) as ActionResult;
             //Assert
-            Assert.IsNotNull(result);
+            ClassicAssert.IsNotNull(result);
 
         }
 
@@ -710,7 +790,7 @@ namespace SocialGoal.Tests.Controllers
         public void Create_Goal_Get_ReturnsView()
         {
 
-            IEnumerable<Focus> fakeFocus = new List<Focus> 
+            IEnumerable<Focus> fakeFocus = new List<Focus>
             {
             new Focus { FocusId = 1, FocusName="Test1",GroupId = 1},
              new Focus { FocusId = 2, FocusName="Test2",GroupId = 1},
@@ -718,7 +798,7 @@ namespace SocialGoal.Tests.Controllers
           }.AsEnumerable();
             focusRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<Focus, bool>>>())).Returns(fakeFocus);
 
-            IEnumerable<Metric> fakeMatrices = new List<Metric> 
+            IEnumerable<Metric> fakeMatrices = new List<Metric>
             {
                 new Metric{MetricId=1, Type="Test1"},
                 new Metric{MetricId=2,Type="Test2"},
@@ -727,12 +807,12 @@ namespace SocialGoal.Tests.Controllers
 
             metricRepository.Setup(x => x.GetAll()).Returns(fakeMatrices);
             GroupGoalFormModel goal = new GroupGoalFormModel();
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             ViewResult result = controller.CreateGoal(1) as ViewResult;
 
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupGoalFormModel),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupGoalFormModel),
                 result.ViewData.Model, "Wrong View Model");
 
 
@@ -750,35 +830,43 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -791,7 +879,7 @@ namespace SocialGoal.Tests.Controllers
 
 
             // Act
-            Mapper.CreateMap<GroupGoalFormModel, GroupGoal>();
+            // AutoMapper already configured in SetUp
 
             GroupGoalFormModel goal = new GroupGoalFormModel()
             {
@@ -808,7 +896,7 @@ namespace SocialGoal.Tests.Controllers
             var result = (RedirectToRouteResult)controller.CreateGoal(goal);
 
 
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
 
         }
@@ -819,15 +907,15 @@ namespace SocialGoal.Tests.Controllers
 
             Group group = new Group() { GroupId = 1, GroupName = "Test", Description = "test" };
             groupRepository.Setup(x => x.GetById(1)).Returns(group);
-            Mapper.CreateMap<Group, GroupFormModel>();
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            // AutoMapper already configured in SetUp
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
 
             ViewResult actual = controller.EditGroup(1) as ViewResult;
 
 
-            Assert.IsNotNull(actual, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupFormModel),
+            ClassicAssert.IsNotNull(actual, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupFormModel),
                 actual.ViewData.Model, "Wrong View Model");
         }
 
@@ -838,11 +926,11 @@ namespace SocialGoal.Tests.Controllers
 
             Focus focus = new Focus() { FocusId = 1, FocusName = "Test", Description = "test" };
             focusRepository.Setup(x => x.GetById(1)).Returns(focus);
-            Mapper.CreateMap<Focus, FocusFormModel>();
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            // AutoMapper already configured in SetUp
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             ViewResult actual = controller.EditFocus(1) as ViewResult;
-            Assert.IsNotNull(actual, "View Result is null");
-            Assert.IsInstanceOf(typeof(FocusFormModel),
+            ClassicAssert.IsNotNull(actual, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(FocusFormModel),
                 actual.ViewData.Model, "Wrong View Model");
         }
 
@@ -856,15 +944,15 @@ namespace SocialGoal.Tests.Controllers
                 Description = "test"
             };
             focusRepository.Setup(x => x.GetById(1)).Returns(fake);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             ViewResult result = controller.DeleteFocus(1) as ViewResult;
 
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(Focus),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(Focus),
                  result.ViewData.Model, "Wrong View Model");
             var focus = result.ViewData.Model as Focus;
-            Assert.AreEqual("test", focus.Description, "Got wrong Focus Description");
+            ClassicAssert.AreEqual("test", focus.Description, "Got wrong Focus Description");
 
         }
 
@@ -878,13 +966,13 @@ namespace SocialGoal.Tests.Controllers
                 Description = "test"
             };
             groupRepository.Setup(x => x.GetById(1)).Returns(fake);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             ViewResult result = controller.DeleteGroup(1) as ViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(Group),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(Group),
                  result.ViewData.Model, "Wrong View Model");
             var group = result.ViewData.Model as Group;
-            Assert.AreEqual("test", group.Description, "Got wrong Focus Description");
+            ClassicAssert.AreEqual("test", group.Description, "Got wrong Focus Description");
 
         }
         [Test]
@@ -908,13 +996,13 @@ namespace SocialGoal.Tests.Controllers
 
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(fake);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             ViewResult result = controller.DeleteGoal(1) as ViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupGoal),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupGoal),
                  result.ViewData.Model, "Wrong View Model");
             var group = result.ViewData.Model as GroupGoal;
-            Assert.AreEqual("test", group.Description, "Got wrong Focus Description");
+            ClassicAssert.AreEqual("test", group.Description, "Got wrong Focus Description");
 
         }
 
@@ -929,12 +1017,12 @@ namespace SocialGoal.Tests.Controllers
             };
 
             focusRepository.Setup(x => x.GetById(1)).Returns(fake);
-            Assert.IsNotNull(fake);
-            Assert.AreEqual("test", fake.FocusName);
+            ClassicAssert.IsNotNull(fake);
+            ClassicAssert.AreEqual("test", fake.FocusName);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.DeleteConfirmedFocus(1) as RedirectToRouteResult;
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
 
         }
@@ -950,39 +1038,39 @@ namespace SocialGoal.Tests.Controllers
             groupRepository.Setup(x => x.GetById(fake.GroupId)).Returns(fake);
 
 
-            Assert.IsNotNull(fake);
-            Assert.AreEqual(1, fake.GroupId);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            ClassicAssert.IsNotNull(fake);
+            ClassicAssert.AreEqual(1, fake.GroupId);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.DeleteConfirmedGroup(1) as RedirectToRouteResult;
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
         }
         [Test]
         public void ListOfGroups_Test()
         {
-            // Arrange      
+            // Arrange
             IEnumerable<Group> fakeCategories = new List<Group> {
             new Group { GroupName = "Test1", Description="Test1Desc"},
             new Group {  GroupName= "Test2", Description="Test2Desc"},
             new Group { GroupName = "Test3", Description="Test3Desc"}
           }.AsEnumerable();
             groupRepository.Setup(x => x.GetAll()).Returns(fakeCategories);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             // Act
             ViewResult result = controller.ListOfGroups() as ViewResult;
             // Assert
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(IEnumerable<Group>),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(IEnumerable<Group>),
             result.ViewData.Model, "Wrong View Model");
             var grp = result.ViewData.Model as IEnumerable<Group>;
-            Assert.AreEqual(3, grp.Count(), "Got wrong number of Groups");
+            ClassicAssert.AreEqual(3, grp.Count(), "Got wrong number of Groups");
         }
 
         [Test]
         public void Joined_User_Test()
         {
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
@@ -991,24 +1079,24 @@ namespace SocialGoal.Tests.Controllers
             userRepository.Setup(x => x.GetAll()).Returns(fakeUser);
 
 
-            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {            
+            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ee"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ef"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512eg"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=2,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512eh"}
-           
+
           }.AsEnumerable();
             groupUserRepository.Setup(x => x.GetAll()).Returns(fakeGroupUser);
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             // Act
             ViewResult result = controller.JoinedUsers(1) as ViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupMemberViewModel),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupMemberViewModel),
             result.ViewData.Model, "Wrong View Model");
 
 
@@ -1019,10 +1107,10 @@ namespace SocialGoal.Tests.Controllers
         [Test]
         public void Edit_Group_Post()
         {
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             // Act
-            Mapper.CreateMap<GroupFormModel, Group>();
+            // AutoMapper already configured in SetUp
             GroupFormModel group = new GroupFormModel()
             {
                 UserId = "402bd590-fdc7-49ad-9728-40efbfe512ec",
@@ -1033,17 +1121,17 @@ namespace SocialGoal.Tests.Controllers
 
             };
             var result = (RedirectToRouteResult)controller.EditGroup(group);
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
         }
 
         [Test]
         public void Edit_Focus_Post()
         {
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             // Act
-            Mapper.CreateMap<FocusFormModel, Focus>();
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<FocusFormModel, Focus>());
             FocusFormModel group = new FocusFormModel()
             {
                 FocusId = 1,
@@ -1062,7 +1150,7 @@ namespace SocialGoal.Tests.Controllers
             };
             groupRepository.Setup(x => x.GetById(1)).Returns(grp);
             var result = (RedirectToRouteResult)controller.EditFocus(group);
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
         }
         [Test]
@@ -1089,7 +1177,7 @@ namespace SocialGoal.Tests.Controllers
                 EndDate = DateTime.Now.AddDays(1),
             };
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
-            IEnumerable<Focus> fakeFocus = new List<Focus> 
+            IEnumerable<Focus> fakeFocus = new List<Focus>
             {
             new Focus { FocusId = 1, FocusName="Test1",GroupId = 1},
              new Focus { FocusId = 2, FocusName="Test2",GroupId = 1},
@@ -1097,7 +1185,7 @@ namespace SocialGoal.Tests.Controllers
           }.AsEnumerable();
             focusRepository.Setup(x => x.GetMany(p => p.GroupId.Equals(1))).Returns(fakeFocus);
 
-            IEnumerable<Metric> fakeMatrices = new List<Metric> 
+            IEnumerable<Metric> fakeMatrices = new List<Metric>
             {
                 new Metric{MetricId=1, Type="Test1"},
                 new Metric{MetricId=2,Type="Test2"},
@@ -1106,11 +1194,11 @@ namespace SocialGoal.Tests.Controllers
 
             metricRepository.Setup(x => x.GetAll()).Returns(fakeMatrices);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
-            Mapper.CreateMap<GroupGoal, GroupGoalFormModel>();
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
+            // AutoMapper already configured in SetUp
             ViewResult result = controller.EditGoal(1) as ViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupGoalFormModel),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupGoalFormModel),
                 result.ViewData.Model, "Wrong View Model");
         }
 
@@ -1118,9 +1206,9 @@ namespace SocialGoal.Tests.Controllers
         public void Edit_Goal_Post()
         {
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
-            Mapper.CreateMap<GroupGoalFormModel, GroupGoal>();
+            // AutoMapper already configured in SetUp
 
             GroupGoalFormModel goal = new GroupGoalFormModel()
             {
@@ -1134,7 +1222,7 @@ namespace SocialGoal.Tests.Controllers
 
             };
             var result = (RedirectToRouteResult)controller.EditGoal(goal);
-            Assert.AreEqual("GroupGoal", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("GroupGoal", result.RouteValues["action"]);
 
 
 
@@ -1144,7 +1232,7 @@ namespace SocialGoal.Tests.Controllers
         public void Members_View()
         {
 
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
@@ -1153,24 +1241,24 @@ namespace SocialGoal.Tests.Controllers
             userRepository.Setup(x => x.GetAll()).Returns(fakeUser);
 
 
-            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {            
+            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ee"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ef"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512eg"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=2,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512eh"}
-           
+
           }.AsEnumerable();
             groupUserRepository.Setup(x => x.GetAll()).Returns(fakeGroupUser);
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             // Act
             ViewResult result = controller.Members(1) as ViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupMemberViewModel),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupMemberViewModel),
             result.ViewData.Model, "Wrong View Model");
 
         }
@@ -1186,9 +1274,9 @@ namespace SocialGoal.Tests.Controllers
             };
             groupUserRepository.Setup(x => x.Get(It.IsAny<Expression<Func<GroupUser, bool>>>())).Returns(user);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.DeleteMember("402bd590-fdc7-49ad-9728-40efbfe512ec", 1) as RedirectToRouteResult;
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
         }
 
         [Test]
@@ -1207,24 +1295,24 @@ namespace SocialGoal.Tests.Controllers
                 GroupUser = user
             };
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.DeleteConfirmed(1) as RedirectToRouteResult;
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
         }
 
         [Test]
         public void Save_Update_Update_Mandatory_Test()
         {
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
-            // The MVC pipeline doesn't run, so binding and validation don't run. 
+            // The MVC pipeline doesn't run, so binding and validation don't run.
             controller.ModelState.AddModelError("", "mock error message");
             GroupUpdateFormModel update = new GroupUpdateFormModel();
             update.Updatemsg = string.Empty;
             var result = controller.SaveUpdate(update) as RedirectToRouteResult;
 
-            Assert.IsNull(result);
+            ClassicAssert.IsNull(result);
         }
 
         [Test]
@@ -1239,43 +1327,51 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");            //identity.Setup(x=>x.)
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
-            Mapper.CreateMap<GroupUpdateFormModel, GroupUpdate>();
+            // AutoMapper already configured in SetUp
 
             Metric fakeMetric = new Metric()
             {
@@ -1291,11 +1387,11 @@ namespace SocialGoal.Tests.Controllers
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
 
 
-            IEnumerable<GroupUpdate> updt = new List<GroupUpdate> {            
+            IEnumerable<GroupUpdate> updt = new List<GroupUpdate> {
             new GroupUpdate { GroupUpdateId =1, Updatemsg = "t1",GroupGoalId =1},
              new GroupUpdate { GroupUpdateId =2, Updatemsg = "t2",GroupGoalId =1},
               new GroupUpdate { GroupUpdateId =3, Updatemsg = "t3",GroupGoalId =2},
-            
+
           }.AsEnumerable();
             groupUdateRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUpdate, bool>>>())).Returns(updt);
 
@@ -1313,14 +1409,14 @@ namespace SocialGoal.Tests.Controllers
             };
             groupUpdateUserRepository.Setup(x => x.Get(It.IsAny<Expression<Func<GroupUpdateUser, bool>>>())).Returns(updtuser);
 
-            Mapper.CreateMap<GroupUpdate, GroupUpdateViewModel>();
+            // AutoMapper already configured in SetUp
             GroupUpdateFormModel mock = new GroupUpdateFormModel();
             mock.GroupId = 1;
             mock.Updatemsg = "mock";
             mock.GroupGoalId = 1;
             PartialViewResult result = controller.SaveUpdate(mock) as PartialViewResult;
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOf(typeof(GroupUpdateListViewModel),
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(GroupUpdateListViewModel),
             result.ViewData.Model, "Wrong View Model");
 
 
@@ -1338,38 +1434,46 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");            //identity.Setup(x=>x.)
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -1385,11 +1489,11 @@ namespace SocialGoal.Tests.Controllers
             };
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
 
-            IEnumerable<GroupUpdate> updt = new List<GroupUpdate> {            
+            IEnumerable<GroupUpdate> updt = new List<GroupUpdate> {
             new GroupUpdate { GroupUpdateId =1, Updatemsg = "t1", GroupGoalId = 1},
              new GroupUpdate { GroupUpdateId =2, Updatemsg = "t2", GroupGoalId=2 },
               new GroupUpdate { GroupUpdateId =3, Updatemsg = "t3", GroupGoalId=2},
-            
+
           }.AsEnumerable();
             groupUdateRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUpdate, bool>>>())).Returns(updt);
 
@@ -1407,12 +1511,12 @@ namespace SocialGoal.Tests.Controllers
             };
             groupUpdateUserRepository.Setup(x => x.Get(It.IsAny<Expression<Func<GroupUpdateUser, bool>>>())).Returns(updtuser);
 
-            Mapper.CreateMap<GroupUpdate, GroupUpdateViewModel>();
+            // AutoMapper already configured in SetUp
             // GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
             PartialViewResult rslt = controller.DisplayUpdates(1) as PartialViewResult;
-            Assert.IsNotNull(rslt);
-            Assert.IsInstanceOf(typeof(GroupUpdateListViewModel),
-           rslt.ViewData.Model, "Wrong View Model");
+            ClassicAssert.IsNotNull(rslt);
+            ClassicAssert.IsInstanceOf(typeof(GroupUpdateListViewModel),
+            rslt.ViewData.Model, "Wrong View Model");
 
 
         }
@@ -1420,13 +1524,13 @@ namespace SocialGoal.Tests.Controllers
         [Test]
         public void DisplayComments()
         {
-            IEnumerable<GroupComment> cmnt = new List<GroupComment> {            
+            IEnumerable<GroupComment> cmnt = new List<GroupComment> {
 
             new GroupComment { GroupCommentId =1, GroupUpdateId = 1,CommentText="x"},
             new GroupComment { GroupCommentId =2, GroupUpdateId = 1,CommentText="y"},
             new GroupComment { GroupCommentId =3, GroupUpdateId = 1,CommentText="z"},
-             
-            
+
+
           }.AsEnumerable();
 
             groupCommentRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupComment, bool>>>())).Returns(cmnt);
@@ -1441,15 +1545,15 @@ namespace SocialGoal.Tests.Controllers
             ApplicationUser applicationUser = getApplicationUser();
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
-            Mapper.CreateMap<GroupComment, GroupCommentsViewModel>();
+            // AutoMapper already configured in SetUp
             PartialViewResult rslt = controller.DisplayComments(1) as PartialViewResult;
-            Assert.IsNotNull(rslt, "View Result is null");
-            Assert.IsInstanceOf(typeof(IEnumerable<GroupCommentsViewModel>),
+            ClassicAssert.IsNotNull(rslt, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(IEnumerable<GroupCommentsViewModel>),
              rslt.ViewData.Model, "Wrong View Model");
             var cmntsView = rslt.ViewData.Model as IEnumerable<GroupCommentsViewModel>;
-            Assert.AreEqual(3, cmntsView.Count(), "Got wrong number of Comments");
+            ClassicAssert.AreEqual(3, cmntsView.Count(), "Got wrong number of Comments");
         }
 
         [Test]
@@ -1464,77 +1568,85 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
-            // Arrange                    
+            // Arrange
 
 
-            // Act          
+            // Act
             GroupCommentFormModel Cmnt = new GroupCommentFormModel();
-            Mapper.CreateMap<GroupCommentFormModel, GroupComment>();
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<GroupCommentFormModel, GroupComment>());
             Cmnt.CommentText = "Mock";
             var result = controller.SaveComment(Cmnt) as RedirectToRouteResult;
-            // Assert 
-            Assert.AreEqual("DisplayComments", result.RouteValues["action"]);
+            // Assert
+            ClassicAssert.AreEqual("DisplayComments", result.RouteValues["action"]);
         }
         [Test]
         public void DisplayCommentCount()
         {
-            IEnumerable<GroupComment> cmnt = new List<GroupComment> {            
+            IEnumerable<GroupComment> cmnt = new List<GroupComment> {
 
             new GroupComment { GroupCommentId =1, GroupUpdateId = 1,CommentText="x"},
             new GroupComment { GroupCommentId =2, GroupUpdateId = 1,CommentText="y"},
             new GroupComment { GroupCommentId =3, GroupUpdateId = 1,CommentText="z"},
-             
-            
+
+
           }.AsEnumerable();
 
             groupCommentRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupComment, bool>>>())).Returns(cmnt);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             JsonResult count = controller.DisplayCommentCount(1) as JsonResult;
-            Assert.IsNotNull(count);
-            Assert.AreEqual(3, count.Data);
+            ClassicAssert.IsNotNull(count);
+            ClassicAssert.AreEqual(3, count.Value);
 
         }
         [Test]
         public void SearchUserForGroup()
         {
 
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
@@ -1546,11 +1658,11 @@ namespace SocialGoal.Tests.Controllers
             {
                 GroupId = 1
             };
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var searchString = "e";
             JsonResult result = controller.SearchUserForGroup(searchString, 1);
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOf(typeof(JsonResult), result);
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(JsonResult), result);
 
 
 
@@ -1567,33 +1679,44 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
+
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
+
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
@@ -1603,17 +1726,17 @@ namespace SocialGoal.Tests.Controllers
             var id = 1;
             PartialViewResult rslt = controller.InviteUser(id, userId) as PartialViewResult;
 
-            Assert.IsNotNull(rslt);
-            Assert.IsInstanceOf(typeof(ApplicationUser),
+            ClassicAssert.IsNotNull(rslt);
+            ClassicAssert.IsInstanceOf(typeof(ApplicationUser),
               rslt.ViewData.Model, "Wrong View Model");
             var userView = rslt.ViewData.Model as ApplicationUser;
-            Assert.AreEqual("adarsh@foo.com", userView.Email);
+            ClassicAssert.AreEqual("adarsh@foo.com", userView.Email);
 
         }
         [Test]
         public void Invite_Users()
         {
-            Mapper.CreateMap<Group, GroupViewModel>();
+            var config = new MapperConfiguration(cfg => cfg.CreateMap<Group, GroupViewModel>());
             Group grp = new Group()
             {
                 GroupId = 1,
@@ -1622,10 +1745,10 @@ namespace SocialGoal.Tests.Controllers
             };
             groupRepository.Setup(x => x.GetById(1)).Returns(grp);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             ViewResult reslt = controller.InviteUsers(1) as ViewResult;
-            Assert.IsNotNull(reslt);
-            Assert.IsInstanceOf(typeof(GroupViewModel),
+            ClassicAssert.IsNotNull(reslt);
+            ClassicAssert.IsInstanceOf(typeof(GroupViewModel),
                reslt.ViewData.Model, "Wrong View Model");
             //var grpview = reslt.ViewData.Model as GroupViewModel;
             //Assert.AreEqual("t", grpview.GroupName);
@@ -1635,23 +1758,23 @@ namespace SocialGoal.Tests.Controllers
         public void Users_List()
         {
 
-            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {            
+            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=2,UserId="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=3,UserId="402bd590-fdc7-49ad-9728-40efbfe512ee"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=4,UserId="402bd590-fdc7-49ad-9728-40efbfe512ef"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=5,UserId="402bd590-fdc7-49ad-9728-40efbfe512eg"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=2,GroupUserId=6,UserId="402bd590-fdc7-49ad-9728-40efbfe512eh"}
-           
+
           }.AsEnumerable();
             groupUserRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUser, bool>>>())).Returns(fakeGroupUser);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             ViewResult result = controller.UsersList(2) as ViewResult;
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOfType(typeof(List<GroupUser>), result.ViewData.Model, "Wrong Model");
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(List<GroupUser>), result.ViewData.Model, "Wrong Model");
             var grpusr = result.ViewData.Model as List<GroupUser>;
-            Assert.AreEqual(6, grpusr.Count(), "Got wrong number of GroupUser");
+            ClassicAssert.AreEqual(6, grpusr.Count(), "Got wrong number of GroupUser");
 
 
         }
@@ -1667,49 +1790,57 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
 
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             //principal.SetupGet(x=>x.Get(((SocialGoalUser)(User.Identity)).UserId).Callback(1));
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
             //identity.Setup(x=>x.)
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
             var result = controller.JoinGroup(1) as RedirectToRouteResult;
-            Assert.AreEqual("Index", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", result.RouteValues["action"]);
 
         }
 
@@ -1725,50 +1856,58 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
 
 
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             //principal.SetupGet(x=>x.Get(((SocialGoalUser)(User.Identity)).UserId).Callback(1));
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
             //identity.Setup(x=>x.)
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
-            Mapper.CreateMap<GroupRequestFormModel, GroupRequest>();
+            // AutoMapper already configured in SetUp
 
             var rslt = controller.GroupJoinRequest(1) as RedirectToRouteResult;
-            Assert.AreEqual("Index", rslt.RouteValues["action"]);
+            ClassicAssert.AreEqual("Index", rslt.RouteValues["action"]);
 
         }
 
@@ -1789,9 +1928,9 @@ namespace SocialGoal.Tests.Controllers
 
             };
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             string result = controller.GoalStatus(1, 1) as string;
-            Assert.AreEqual("InProgress", result);
+            ClassicAssert.AreEqual("InProgress", result);
         }
 
         [Test]
@@ -1803,9 +1942,9 @@ namespace SocialGoal.Tests.Controllers
                 GroupGoalId = 1
             };
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             JsonResult reslt = controller.GetGoalReport(1) as JsonResult;
-            Assert.IsNotNull(reslt);
+            ClassicAssert.IsNotNull(reslt);
 
         }
 
@@ -1815,15 +1954,15 @@ namespace SocialGoal.Tests.Controllers
             IEnumerable<Group> fake = new List<Group> {
             new Group{ GroupName = "Test1", Description="Test1Desc"},
             new Group { GroupName = "Test2", Description="Test2Desc"},
-          
+
           }.AsEnumerable();
             groupRepository.Setup(x => x.GetAll()).Returns(fake);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             PartialViewResult result = controller.Groupslist(0) as PartialViewResult;
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOf(typeof(IEnumerable<Group>), result.ViewData.Model, "Wrong View Model");
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(IEnumerable<Group>), result.ViewData.Model, "Wrong View Model");
             var gol = result.ViewData.Model as IEnumerable<Group>;
-            Assert.AreEqual(2, gol.Count(), "Got wrong number of Groups");
+            ClassicAssert.AreEqual(2, gol.Count(), "Got wrong number of Groups");
         }
         [Test]
         public void Accept_Group_Join_Request_Post_Action()
@@ -1841,9 +1980,9 @@ namespace SocialGoal.Tests.Controllers
                 UserId = "402bd590-fdc7-49ad-9728-40efbfe512ec"
             };
             groupRequestRepository.Setup(x => x.Get(It.IsAny<Expression<Func<GroupRequest, bool>>>())).Returns(request);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.AcceptRequest(1, "402bd590-fdc7-49ad-9728-40efbfe512ec") as RedirectToRouteResult;
-            Assert.AreEqual("ShowAllRequests", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("ShowAllRequests", result.RouteValues["action"]);
         }
 
         [Test]
@@ -1855,31 +1994,31 @@ namespace SocialGoal.Tests.Controllers
                 GroupId = 1
             };
             groupRequestRepository.Setup(x => x.Get(It.IsAny<Expression<Func<GroupRequest, bool>>>())).Returns(request);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.RejectRequest(1, "402bd590-fdc7-49ad-9728-40efbfe512ec") as RedirectToRouteResult;
-            Assert.AreEqual("ShowAllRequests", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("ShowAllRequests", result.RouteValues["action"]);
         }
 
         [Test]
         public void Show_All_Request_View()
         {
-            IEnumerable<GroupRequest> request = new List<GroupRequest> {            
+            IEnumerable<GroupRequest> request = new List<GroupRequest> {
             new GroupRequest {GroupId =1,Accepted = false},
             new GroupRequest {GroupId =1,Accepted = false},
             new GroupRequest {GroupId =1,Accepted = false},
-            
+
           }.AsEnumerable();
             groupRequestRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupRequest, bool>>>())).Returns(request);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
-            Mapper.CreateMap<GroupRequest, GroupRequestViewModel>();
+            // AutoMapper already configured in SetUp
             ViewResult result = controller.ShowAllRequests(1) as ViewResult;
-            Assert.IsNotNull(result);
-            Assert.AreEqual("_RequestsView", result.ViewName);
-            Assert.IsInstanceOf(typeof(IEnumerable<GroupRequestViewModel>), result.ViewData.Model, "Wrong View Model");
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.AreEqual("_RequestsView", result.ViewName);
+            ClassicAssert.IsInstanceOf(typeof(IEnumerable<GroupRequestViewModel>), result.ViewData.Model, "Wrong View Model");
             var gol = result.ViewData.Model as IEnumerable<GroupRequestViewModel>;
-            Assert.AreEqual(3, gol.Count(), "Got wrong number of Groups");
+            ClassicAssert.AreEqual(3, gol.Count(), "Got wrong number of Groups");
 
 
         }
@@ -1896,55 +2035,63 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
             //userRepository.Setup(x => x.GetById(1)).Returns(user);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");            //identity.Setup(x=>x.)
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
 
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
-
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
 
-            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {            
+            IEnumerable<GroupUser> fakeGroupUser = new List<GroupUser> {
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=1,UserId="402bd590-fdc7-49ad-9728-40efbfe512ec"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=2,UserId="402bd590-fdc7-49ad-9728-40efbfe512ed"},
             new GroupUser {AddedDate=DateTime.Now,Admin=false,GroupId=1,GroupUserId=3,UserId="402bd590-fdc7-49ad-9728-40efbfe512ee"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=4,UserId="402bd590-fdc7-49ad-9728-40efbfe512ef"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=1,GroupUserId=5,UserId="402bd590-fdc7-49ad-9728-40efbfe512eg"},
             new GroupUser {AddedDate=DateTime.Now,Admin=true,GroupId=2,GroupUserId=6,UserId="402bd590-fdc7-49ad-9728-40efbfe512eh"}
-           
+
           }.AsEnumerable();
             groupUserRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUser, bool>>>())).Returns(fakeGroupUser);
 
 
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
@@ -1953,9 +2100,9 @@ namespace SocialGoal.Tests.Controllers
             userRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(fakeUser);
 
             PartialViewResult result = controller.SearchMemberForGoalAssigning(1) as PartialViewResult;
-            Assert.IsNotNull(result);
-            Assert.AreEqual("_MembersToSearch", result.ViewName);
-            Assert.IsInstanceOf(typeof(IEnumerable<MemberViewModel>), result.ViewData.Model, "Wrong View Model");
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.AreEqual("_MembersToSearch", result.ViewName);
+            ClassicAssert.IsInstanceOf(typeof(IEnumerable<MemberViewModel>), result.ViewData.Model, "Wrong View Model");
         }
 
         [Test]
@@ -1971,14 +2118,14 @@ namespace SocialGoal.Tests.Controllers
             };
             groupUdateRepository.Setup(x => x.GetById(1)).Returns(update);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
-            Mapper.CreateMap<GroupUpdate, GroupUpdateFormModel>();
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
+            // AutoMapper already configured in SetUp
             PartialViewResult result = controller.EditUpdate(1) as PartialViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupUpdateFormModel),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupUpdateFormModel),
                 result.ViewData.Model, "Wrong View Model");
             var data = result.ViewData.Model as GroupUpdateFormModel;
-            Assert.AreEqual("abc", data.Updatemsg);
+            ClassicAssert.AreEqual("abc", data.Updatemsg);
         }
 
 
@@ -1994,43 +2141,54 @@ namespace SocialGoal.Tests.Controllers
                 UserIdentifier = applicationUser.Email,
                 RoleName = Enum.GetName(typeof(UserRoles), applicationUser.RoleId)
             };
-            var testTicket = new FormsAuthenticationTicket(
-                1,
-                user.Id,
-                DateTime.Now,
-                DateTime.Now.Add(FormsAuthentication.Timeout),
-                false,
-                userContext.ToString());
+            // Create authentication properties instead of FormsAuthenticationTicket
+            var authProperties = new AuthenticationProperties
+            {
+                ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(30),
+                IsPersistent = false
+            };
 
 
             userRepository.Setup(x => x.Get(It.IsAny<Expression<Func<ApplicationUser, bool>>>())).Returns(applicationUser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
 
             principal.SetupGet(x => x.Identity.Name).Returns("adarsh");
-            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object);
-            controllerContext.SetupGet(p => p.HttpContext.Request.IsAuthenticated).Returns(true);
+            controllerContext.SetupGet(x => x.HttpContext.User).Returns(principal.Object as ClaimsPrincipal);
+            principal.SetupGet(p => p.Identity.IsAuthenticated).Returns(true);
             controller.ControllerContext = controllerContext.Object;
 
             contextBase.SetupGet(x => x.Request).Returns(httpRequest.Object);
             contextBase.SetupGet(x => x.Response).Returns(httpResponse.Object);
             genericPrincipal.Setup(x => x.Identity).Returns(identity.Object);
 
-            contextBase.SetupGet(a => a.Response.Cookies).Returns(new HttpCookieCollection());
+            contextBase.SetupGet(a => a.Response.Cookies).Returns(responseCookies.Object);
 
-            var formsAuthentication = new DefaultFormsAuthentication();
-            formsAuthentication.SetAuthCookie(contextBase.Object, testTicket);
+            // Use ASP.NET Core authentication
+            var claimsIdentity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, user.Id),
+                new Claim(ClaimTypes.Email, applicationUser.Email),
+                new Claim("UserContext", userContext.ToString())
+            }, CookieAuthenticationDefaults.AuthenticationScheme);
 
-            HttpCookie authCookie = contextBase.Object.Response.Cookies[FormsAuthentication.FormsCookieName];
+            var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
 
-            var ticket = formsAuthentication.Decrypt(authCookie.Value);
-            var goalsetterUser = new SocialGoalUser(ticket);
+            string cookieValue = null;
+            responseCookies.Setup(c => c.Append(CookieAuthenticationDefaults.AuthenticationScheme, It.IsAny<string>(), It.IsAny<CookieOptions>()))
+                .Callback<string, string, CookieOptions>((name, value, options) => cookieValue = value);
+
+            // Mock authentication setup
+            httpContext.Setup(c => c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()));
+
+            var goalsetterUser = new SocialGoalUser(userContext.UserId, userContext.DisplayName, userContext.UserIdentifier, userContext.RoleName);
             string[] userRoles = { goalsetterUser.RoleName };
 
             principal.Setup(x => x.Identity).Returns(goalsetterUser);
             //GoalController controller = new GoalController(goalService, metricService, focusService, supportService, updateService, commentService, userService, securityTokenService, supportInvitationService, goalStatusService, commentUserService, updateSupportService);
-            Mapper.CreateMap<GroupUpdateFormModel, GroupUpdate>();
-            Mapper.CreateMap<GroupUpdate, GroupUpdateViewModel>();
+            // AutoMapper already configured in SetUp
+            // AutoMapper already configured in SetUp
 
             Metric fakeMetric = new Metric()
             {
@@ -2046,11 +2204,11 @@ namespace SocialGoal.Tests.Controllers
             groupGoalRepository.Setup(x => x.GetById(1)).Returns(goal);
 
 
-            IEnumerable<GroupUpdate> updt = new List<GroupUpdate> {            
+            IEnumerable<GroupUpdate> updt = new List<GroupUpdate> {
             new GroupUpdate { GroupUpdateId =1, Updatemsg = "t1",GroupGoalId =1},
              new GroupUpdate { GroupUpdateId =2, Updatemsg = "t2",GroupGoalId =1},
               new GroupUpdate { GroupUpdateId =3, Updatemsg = "t3",GroupGoalId =2},
-            
+
           }.AsEnumerable();
             groupUdateRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUpdate, bool>>>())).Returns(updt);
 
@@ -2072,8 +2230,8 @@ namespace SocialGoal.Tests.Controllers
             mock.GroupGoalId = 1;
             mock.status = 34;
             PartialViewResult result = controller.EditUpdate(mock) as PartialViewResult;
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOf(typeof(GroupUpdateListViewModel),
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(GroupUpdateListViewModel),
             result.ViewData.Model, "Wrong View Model");
         }
 
@@ -2090,13 +2248,13 @@ namespace SocialGoal.Tests.Controllers
             };
             groupUdateRepository.Setup(x => x.GetById(1)).Returns(update);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             PartialViewResult result = controller.DeleteUpdate(1) as PartialViewResult;
-            Assert.IsNotNull(result, "View Result is null");
-            Assert.IsInstanceOf(typeof(GroupUpdate),
+            ClassicAssert.IsNotNull(result, "View Result is null");
+            ClassicAssert.IsInstanceOf(typeof(GroupUpdate),
                  result.ViewData.Model, "Wrong View Model");
             var group = result.ViewData.Model as GroupUpdate;
-            Assert.AreEqual("abc", group.Updatemsg, "Got wrong message");
+            ClassicAssert.AreEqual("abc", group.Updatemsg, "Got wrong message");
 
         }
 
@@ -2112,9 +2270,9 @@ namespace SocialGoal.Tests.Controllers
 
             };
             groupUdateRepository.Setup(x => x.GetById(1)).Returns(update);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             var result = controller.DeleteConfirmedUpdate(1) as RedirectToRouteResult;
-            Assert.AreEqual("GroupGoal", result.RouteValues["action"]);
+            ClassicAssert.AreEqual("GroupGoal", result.RouteValues["action"]);
 
         }
 
@@ -2122,42 +2280,42 @@ namespace SocialGoal.Tests.Controllers
         [Test]
         public void Update_Supporters_Count()
         {
-            IEnumerable<GroupUpdateSupport> updtsprt = new List<GroupUpdateSupport> {            
+            IEnumerable<GroupUpdateSupport> updtsprt = new List<GroupUpdateSupport> {
 
             new GroupUpdateSupport { GroupUpdateSupportId =1, GroupUpdateId = 1,GroupUserId = 1},
             new GroupUpdateSupport { GroupUpdateSupportId =2, GroupUpdateId = 1,GroupUserId = 2},
             new GroupUpdateSupport { GroupUpdateSupportId =3, GroupUpdateId = 1,GroupUserId = 3},
-          
-             
-            
+
+
+
           }.AsEnumerable();
 
             groupUpdateSupportRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUpdateSupport, bool>>>())).Returns(updtsprt);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             int count = controller.NoOfSupports(1);
-            Assert.IsNotNull(count);
-            Assert.AreEqual("3", count.ToString());
+            ClassicAssert.IsNotNull(count);
+            ClassicAssert.AreEqual("3", count.ToString());
 
         }
 
         [Test]
         public void Display_Update_Supporters_Count()
         {
-            IEnumerable<GroupUpdateSupport> updtsprt = new List<GroupUpdateSupport> {            
+            IEnumerable<GroupUpdateSupport> updtsprt = new List<GroupUpdateSupport> {
 
             new GroupUpdateSupport { GroupUpdateSupportId =1, GroupUpdateId = 1,GroupUserId = 1},
             new GroupUpdateSupport { GroupUpdateSupportId =2, GroupUpdateId = 1,GroupUserId = 2},
             new GroupUpdateSupport { GroupUpdateSupportId =3, GroupUpdateId = 1,GroupUserId = 3},
-          
-             
-            
+
+
+
           }.AsEnumerable();
 
             groupUpdateSupportRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUpdateSupport, bool>>>())).Returns(updtsprt);
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             JsonResult count = controller.DisplayUpdateSupportCount(1) as JsonResult;
-            Assert.IsNotNull(count);
-            Assert.AreEqual(3, count.Data);
+            ClassicAssert.IsNotNull(count);
+            ClassicAssert.AreEqual(3, count.Value);
 
         }
 
@@ -2165,18 +2323,18 @@ namespace SocialGoal.Tests.Controllers
         public void Supporters_Of_Updates_List()
         {
 
-            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {            
+            IEnumerable<ApplicationUser> fakeUser = new List<ApplicationUser> {
               new ApplicationUser{Activated=true,Email="user1@foo.com",FirstName="user1",LastName="user1",RoleId=0},
               new ApplicationUser{Activated=true,Email="user2@foo.com",FirstName="user2",LastName="user2",RoleId=0},
               new ApplicationUser{Activated=true,Email="user3@foo.com",FirstName="user3",LastName="user3",RoleId=0},
               new ApplicationUser{Activated=true,Email="user4@foo.com",FirstName="user4",LastName="user4",RoleId=0}
           }.AsEnumerable();
             userRepository.Setup(x => x.GetAll()).Returns(fakeUser);
-            IEnumerable<GroupUpdateSupport> fake = new List<GroupUpdateSupport> {            
+            IEnumerable<GroupUpdateSupport> fake = new List<GroupUpdateSupport> {
             new GroupUpdateSupport { GroupUpdateSupportId =1, GroupUpdateId = 1, GroupUserId = 1},
             new GroupUpdateSupport { GroupUpdateSupportId =2, GroupUpdateId = 1, GroupUserId = 2},
             new GroupUpdateSupport { GroupUpdateSupportId =3, GroupUpdateId = 1, GroupUserId = 3},
-          
+
           }.AsEnumerable();
             groupUpdateSupportRepository.Setup(x => x.GetMany(It.IsAny<Expression<Func<GroupUpdateSupport, bool>>>())).Returns(fake);
 
@@ -2187,10 +2345,10 @@ namespace SocialGoal.Tests.Controllers
             };
             groupUserRepository.Setup(x => x.Get(It.IsAny<Expression<Func<GroupUser, bool>>>())).Returns(grpuser);
 
-            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService);
+            GroupController controller = new GroupController(groupService, groupUserService, userService, metricService, focusService, groupgoalService, groupInvitationService, securityTokenService, groupUpdateService, groupCommentService, goalStatusService, groupRequestService, followUserService, groupCommentUserService, groupUpdateSupportService, groupUpdateUserService, userManager.Object, mapper.Object);
             PartialViewResult result = controller.SupportersOfUpdate(1) as PartialViewResult;
-            Assert.IsNotNull(result);
-            Assert.IsInstanceOf(typeof(GroupUpdateSupportersViewModel), result.ViewData.Model, "Wrong View Model");
+            ClassicAssert.IsNotNull(result);
+            ClassicAssert.IsInstanceOf(typeof(GroupUpdateSupportersViewModel), result.ViewData.Model, "Wrong View Model");
         }
 
         public ApplicationUser getApplicationUser()

@@ -1,4 +1,4 @@
-﻿using System.Data.Entity;
+using System.Data.Entity;
 using System.Data.Entity.Infrastructure;
 using SocialGoal.Model.Models;
 using Microsoft.AspNet.Identity.EntityFramework;
@@ -10,7 +10,7 @@ using System.Reflection;
 
 namespace SocialGoal.Data.Models
 {
-    public class SocialGoalEntities : IdentityDbContext<ApplicationUser>
+    public class SocialGoalEntities : IdentityDbContext
     {
 
         public SocialGoalEntities()
@@ -42,7 +42,7 @@ namespace SocialGoal.Data.Models
         public DbSet<CommentUser> CommentUsers { get; set; }
         public DbSet<UpdateSupport> UpdateSupports { get; set; }
         public DbSet<GroupUpdateSupport> GroupUpdateSupports { get; set; }
-   
+
 
         public virtual void Commit()
         {

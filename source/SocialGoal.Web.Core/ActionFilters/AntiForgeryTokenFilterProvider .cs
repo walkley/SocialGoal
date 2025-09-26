@@ -1,24 +1,33 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Web;
-using System.Web.Mvc;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+
 namespace SocialGoal.Web.Core.ActionFilters
 {
-    public class AntiForgeryTokenFilterProvider : System.Web.Mvc.IFilterProvider
+    public class AntiForgeryTokenFilterProvider : IFilterProvider
     {
-        public IEnumerable<Filter> GetFilters(ControllerContext controllerContext, ActionDescriptor actionDescriptor)
+        public void OnProvidersExecuting(FilterProviderContext context)
         {
-            List<Filter> result = new List<Filter>();
-
-            string incomingVerb = controllerContext.HttpContext.Request.HttpMethod;
-
-            if (String.Equals(incomingVerb, "POST", StringComparison.OrdinalIgnoreCase))
+            if (context == null)
             {
-                result.Add(new Filter(new ValidateAntiForgeryTokenAttribute(), FilterScope.Global, null));
+                throw new ArgumentNullException(nameof(context));
             }
 
-            return result;
+            var httpMethod = context.ActionContext.HttpContext.Request.Method;
+
+            if (String.Equals(httpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Results.Add(new FilterItem(new FilterDescriptor(new ValidateAntiForgeryTokenAttribute(), FilterScope.Global)));
+            }
         }
+
+        public void OnProvidersExecuted(FilterProviderContext context)
+        {
+            // No implementation needed
+        }
+
+        public int Order => 0;
     }
 }

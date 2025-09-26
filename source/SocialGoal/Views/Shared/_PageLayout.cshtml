@@ -1,12 +1,42 @@
-﻿@model dynamic
+@model dynamic
 <!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Social Goal</title>
     
-    @Styles.Render("~/Content/CSS")
-    @Scripts.Render("~/Scripts/PageLayout")
+    <link rel="stylesheet" href="~/Content/bootstrap.css" />
+<link rel="stylesheet" href="~/Content/bootstrap-responsive.css" />
+<link rel="stylesheet" href="~/Content/HomePage.css" />
+<link rel="stylesheet" href="~/Content/jquery-ui-1.8.21.custom.css" />
+<link rel="stylesheet" href="~/Content/jqModal.css" />
+<link rel="stylesheet" href="~/Content/jquery.jqplot.min.css" />
+    <script src="~/Scripts/jquery-1.7.2.min.js"></script>
+<script src="~/Scripts/bootstrap-popover.js"></script>
+<script src="~/Scripts/bootstrap-transition.js"></script>
+<script src="~/Scripts/bootstrap-alert.js"></script>
+<script src="~/Scripts/bootstrap-modal.js"></script>
+<script src="~/Scripts/bootstrap-dropdown.js"></script>
+<script src="~/Scripts/bootstrap-scrollspy.js"></script>
+<script src="~/Scripts/bootstrap-collapse.js"></script>
+<script src="~/Scripts/jquery.autocomplete.js"></script>
+<script src="~/Scripts/jquery-ui-1.8.21.custom.min.js"></script>
+<script src="~/Scripts/jquery.unobtrusive-ajax.js"></script>
+<script src="~/Scripts/jquery.pjax.js"></script>
+<script src="~/Scripts/jquery-ui-1.8.11.min.js"></script>
+<script src="~/Scripts/jqDnR.js"></script>
+<script src="~/Scripts/jqModal.js"></script>
+<script src="~/Scripts/jquery.jqplot.min.js"></script>
+<script src="~/Scripts/jqplot.barRenderer.min.js"></script>
+<script src="~/Scripts/jqplot.dateAxisRenderer.min.js"></script>
+<script src="~/Scripts/jqplot.categoryAxisRenderer.min.js"></script>
+<script src="~/Scripts/jqplot.pointLabels.min.js"></script>
+<script src="~/Scripts/jqplot.canvasTextRenderer.min.js"></script>
+<script src="~/Scripts/jqplot.canvasAxisTickRenderer.min.js"></script>
+<script src="~/Scripts/jqplot.ohlcRenderer.min.js"></script>
+<script src="~/Scripts/jqplot.highlighter.min.js"></script>
+<script src="~/Scripts/jquery.nicescroll.min.js"></script>
+<script src="~/Scripts/handlebars-1.0.rc.1.js"></script>
 
     <script type="text/javascript">
 
@@ -93,7 +123,7 @@
                     <h5>
                         MY GOALS</h5>
                     <div>
-                        @{ Html.RenderAction("MyGoals", "Goal"); }
+                        @await Component.InvokeAsync("MyGoals")
                     </div>
                     @*</fieldset>*@
                 </div>
@@ -101,7 +131,7 @@
                     <h5 title="user following goals">
                         FOLLOWED GOALS</h5>
                     <div>
-                        @{ Html.RenderAction("GoalsFollowing", "Goal"); }
+                        @await Component.InvokeAsync("GoalsFollowing")
                     </div>
                 </div>
                 <div id="mygroup" class="well">
@@ -110,7 +140,7 @@
                     <div id="divCreateGroup" style="display: none">
                     </div>
                     <div>
-                        @{ Html.RenderAction("GroupsView", "Group"); }
+                        @await Component.InvokeAsync("GroupsView")
                     </div>
                 </div>
                 <div id="followedgroups" class="well">
@@ -118,7 +148,7 @@
                         <h5>
                             FOLLOWED GROUPS</h5>
                         <div>
-                            @{ Html.RenderAction("FollowedGroups", "Group"); }
+                            @await Component.InvokeAsync("FollowedGroups")
                         </div>
                     </div>
                 </div>
