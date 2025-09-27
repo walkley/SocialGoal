@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "SocialGoal.Web": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:7711;http://localhost:7712"
+    }
+  }
+}

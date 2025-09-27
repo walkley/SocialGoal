@@ -14,7 +14,7 @@ namespace SocialGoal.Model.Models
             DateCreated = DateTime.Now;
         }
 
-        public string Email { get; set; }
+        public override string Email { get; set; }
 
         public string FirstName { get; set; }
 
